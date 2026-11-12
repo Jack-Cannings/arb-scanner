@@ -12,6 +12,9 @@ dependencies = [
     "pydantic>=2,<3",
 ]
 
+[project.scripts]
+betting-backtest = "betting_scanner.interfaces.backtest:main"
+
 [dependency-groups]
 dev = ["pytest>=8.3,<10", "ruff>=0.11,<1", "mypy>=1.15,<2"]
 

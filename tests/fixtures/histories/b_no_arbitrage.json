@@ -1,0 +1,553 @@
+{
+  "name": "B: no arbitrage",
+  "description": "Fictional tennis history and explicitly synthetic adjudications; not real bookmaker evidence.",
+  "snapshots": [
+    {
+      "observed_at": "2026-06-01T12:00:00Z",
+      "snapshot": {
+        "sport": {
+          "id": "tennis",
+          "name": "Tennis"
+        },
+        "competition": {
+          "id": "competition-a",
+          "sport_id": "tennis",
+          "name": "Fictional ATP Example Open",
+          "governing_body_or_category": "ATP"
+        },
+        "event": {
+          "id": "event-a",
+          "sport_id": "tennis",
+          "competition_id": "competition-a",
+          "participants": [
+            {
+              "id": "a-a",
+              "name": "Fictional ATP Player Alpha"
+            },
+            {
+              "id": "a-b",
+              "name": "Fictional ATP Player Beta"
+            }
+          ],
+          "scheduled_start": "2026-06-01T13:00:00Z",
+          "status": "scheduled",
+          "provider_references": {
+            "synthetic": "opaque event/a"
+          }
+        },
+        "bookmakers": [
+          {
+            "id": "book-1",
+            "name": "Fictional Book 1",
+            "region": "uk",
+            "provider_references": {
+              "synthetic": "opaque-book/1"
+            }
+          },
+          {
+            "id": "book-2",
+            "name": "Fictional Book 2",
+            "region": "uk",
+            "provider_references": {
+              "synthetic": "opaque-book/2"
+            }
+          },
+          {
+            "id": "book-3",
+            "name": "Fictional Book 3",
+            "region": "uk",
+            "provider_references": {
+              "synthetic": "opaque-book/3"
+            }
+          }
+        ],
+        "markets": [
+          {
+            "id": "market-a",
+            "event_id": "event-a",
+            "market_type": "match_winner",
+            "outcome_space_description": "Exactly one listed participant wins the completed match.",
+            "expected_outcome_ids": [
+              "a-win-a",
+              "a-win-b"
+            ],
+            "outcomes": [
+              {
+                "id": "a-win-a",
+                "market_id": "market-a",
+                "name": "Fictional ATP Player Alpha wins",
+                "outcome_type": "participant",
+                "participant_id": "a-a"
+              },
+              {
+                "id": "a-win-b",
+                "market_id": "market-a",
+                "name": "Fictional ATP Player Beta wins",
+                "outcome_type": "participant",
+                "participant_id": "a-b"
+              }
+            ],
+            "mutually_exclusive": true,
+            "collectively_exhaustive": true,
+            "period": "full_match",
+            "parameters": {}
+          }
+        ],
+        "quotes": [
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-1",
+            "market_id": "market-a",
+            "outcome_id": "a-win-a",
+            "decimal_odds": "1.80",
+            "provider_updated_at": "2026-06-01T12:00:00Z",
+            "collected_at": "2026-06-01T12:00:00Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-1",
+            "market_id": "market-a",
+            "outcome_id": "a-win-b",
+            "decimal_odds": "1.90",
+            "provider_updated_at": "2026-06-01T12:00:00Z",
+            "collected_at": "2026-06-01T12:00:00Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-2",
+            "market_id": "market-a",
+            "outcome_id": "a-win-a",
+            "decimal_odds": "1.80",
+            "provider_updated_at": "2026-06-01T12:00:00Z",
+            "collected_at": "2026-06-01T12:00:00Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-2",
+            "market_id": "market-a",
+            "outcome_id": "a-win-b",
+            "decimal_odds": "1.90",
+            "provider_updated_at": "2026-06-01T12:00:00Z",
+            "collected_at": "2026-06-01T12:00:00Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-3",
+            "market_id": "market-a",
+            "outcome_id": "a-win-a",
+            "decimal_odds": "1.80",
+            "provider_updated_at": "2026-06-01T12:00:00Z",
+            "collected_at": "2026-06-01T12:00:00Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-3",
+            "market_id": "market-a",
+            "outcome_id": "a-win-b",
+            "decimal_odds": "1.90",
+            "provider_updated_at": "2026-06-01T12:00:00Z",
+            "collected_at": "2026-06-01T12:00:00Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "observed_at": "2026-06-01T12:00:10Z",
+      "snapshot": {
+        "sport": {
+          "id": "tennis",
+          "name": "Tennis"
+        },
+        "competition": {
+          "id": "competition-a",
+          "sport_id": "tennis",
+          "name": "Fictional ATP Example Open",
+          "governing_body_or_category": "ATP"
+        },
+        "event": {
+          "id": "event-a",
+          "sport_id": "tennis",
+          "competition_id": "competition-a",
+          "participants": [
+            {
+              "id": "a-a",
+              "name": "Fictional ATP Player Alpha"
+            },
+            {
+              "id": "a-b",
+              "name": "Fictional ATP Player Beta"
+            }
+          ],
+          "scheduled_start": "2026-06-01T13:00:00Z",
+          "status": "scheduled",
+          "provider_references": {
+            "synthetic": "opaque event/a"
+          }
+        },
+        "bookmakers": [
+          {
+            "id": "book-1",
+            "name": "Fictional Book 1",
+            "region": "uk",
+            "provider_references": {
+              "synthetic": "opaque-book/1"
+            }
+          },
+          {
+            "id": "book-2",
+            "name": "Fictional Book 2",
+            "region": "uk",
+            "provider_references": {
+              "synthetic": "opaque-book/2"
+            }
+          },
+          {
+            "id": "book-3",
+            "name": "Fictional Book 3",
+            "region": "uk",
+            "provider_references": {
+              "synthetic": "opaque-book/3"
+            }
+          }
+        ],
+        "markets": [
+          {
+            "id": "market-a",
+            "event_id": "event-a",
+            "market_type": "match_winner",
+            "outcome_space_description": "Exactly one listed participant wins the completed match.",
+            "expected_outcome_ids": [
+              "a-win-a",
+              "a-win-b"
+            ],
+            "outcomes": [
+              {
+                "id": "a-win-a",
+                "market_id": "market-a",
+                "name": "Fictional ATP Player Alpha wins",
+                "outcome_type": "participant",
+                "participant_id": "a-a"
+              },
+              {
+                "id": "a-win-b",
+                "market_id": "market-a",
+                "name": "Fictional ATP Player Beta wins",
+                "outcome_type": "participant",
+                "participant_id": "a-b"
+              }
+            ],
+            "mutually_exclusive": true,
+            "collectively_exhaustive": true,
+            "period": "full_match",
+            "parameters": {}
+          }
+        ],
+        "quotes": [
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-1",
+            "market_id": "market-a",
+            "outcome_id": "a-win-a",
+            "decimal_odds": "1.80",
+            "provider_updated_at": "2026-06-01T12:00:10Z",
+            "collected_at": "2026-06-01T12:00:10Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-1",
+            "market_id": "market-a",
+            "outcome_id": "a-win-b",
+            "decimal_odds": "1.90",
+            "provider_updated_at": "2026-06-01T12:00:10Z",
+            "collected_at": "2026-06-01T12:00:10Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-2",
+            "market_id": "market-a",
+            "outcome_id": "a-win-a",
+            "decimal_odds": "1.80",
+            "provider_updated_at": "2026-06-01T12:00:10Z",
+            "collected_at": "2026-06-01T12:00:10Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-2",
+            "market_id": "market-a",
+            "outcome_id": "a-win-b",
+            "decimal_odds": "1.90",
+            "provider_updated_at": "2026-06-01T12:00:10Z",
+            "collected_at": "2026-06-01T12:00:10Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-3",
+            "market_id": "market-a",
+            "outcome_id": "a-win-a",
+            "decimal_odds": "1.80",
+            "provider_updated_at": "2026-06-01T12:00:10Z",
+            "collected_at": "2026-06-01T12:00:10Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          },
+          {
+            "provider_id": "synthetic",
+            "provider_event_reference": "opaque event/a",
+            "event_id": "event-a",
+            "bookmaker_id": "book-3",
+            "market_id": "market-a",
+            "outcome_id": "a-win-b",
+            "decimal_odds": "1.90",
+            "provider_updated_at": "2026-06-01T12:00:10Z",
+            "collected_at": "2026-06-01T12:00:10Z",
+            "settlement_rule": {
+              "category": "match_completion_required",
+              "verified": true,
+              "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+              "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+            },
+            "metadata": {
+              "synthetic": true,
+              "fixture": "a",
+              "source_note": "Fictional data only"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "settlements": [
+    {
+      "observed_at": "2026-06-01T14:00:00Z",
+      "event_id": "event-a",
+      "market_id": "market-a",
+      "bookmaker_id": "book-1",
+      "outcome_id": "a-win-a",
+      "disposition": "won",
+      "settlement_rule": {
+        "category": "match_completion_required",
+        "verified": true,
+        "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+        "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+      },
+      "source": "synthetic"
+    },
+    {
+      "observed_at": "2026-06-01T14:00:00Z",
+      "event_id": "event-a",
+      "market_id": "market-a",
+      "bookmaker_id": "book-1",
+      "outcome_id": "a-win-b",
+      "disposition": "lost",
+      "settlement_rule": {
+        "category": "match_completion_required",
+        "verified": true,
+        "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+        "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+      },
+      "source": "synthetic"
+    },
+    {
+      "observed_at": "2026-06-01T14:00:00Z",
+      "event_id": "event-a",
+      "market_id": "market-a",
+      "bookmaker_id": "book-2",
+      "outcome_id": "a-win-a",
+      "disposition": "won",
+      "settlement_rule": {
+        "category": "match_completion_required",
+        "verified": true,
+        "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+        "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+      },
+      "source": "synthetic"
+    },
+    {
+      "observed_at": "2026-06-01T14:00:00Z",
+      "event_id": "event-a",
+      "market_id": "market-a",
+      "bookmaker_id": "book-2",
+      "outcome_id": "a-win-b",
+      "disposition": "lost",
+      "settlement_rule": {
+        "category": "match_completion_required",
+        "verified": true,
+        "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+        "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+      },
+      "source": "synthetic"
+    },
+    {
+      "observed_at": "2026-06-01T14:00:00Z",
+      "event_id": "event-a",
+      "market_id": "market-a",
+      "bookmaker_id": "book-3",
+      "outcome_id": "a-win-a",
+      "disposition": "won",
+      "settlement_rule": {
+        "category": "match_completion_required",
+        "verified": true,
+        "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+        "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+      },
+      "source": "synthetic"
+    },
+    {
+      "observed_at": "2026-06-01T14:00:00Z",
+      "event_id": "event-a",
+      "market_id": "market-a",
+      "bookmaker_id": "book-3",
+      "outcome_id": "a-win-b",
+      "disposition": "lost",
+      "settlement_rule": {
+        "category": "match_completion_required",
+        "verified": true,
+        "description": "Synthetic rule: the match must be completed; retirements void all selections.",
+        "documentation": "Synthetic fixture rulebook v1, section 1 (fictional evidence, not real bookmaker rules)."
+      },
+      "source": "synthetic"
+    }
+  ],
+  "execution_instructions": []
+}

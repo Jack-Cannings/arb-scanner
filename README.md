@@ -7,14 +7,15 @@ be presented for manual investigation.
 
 ## Current implementation
 
-Project foundations, provider-independent core data models and an offline
-cross-bookmaker arbitrage engine are implemented:
+Project foundations, provider-independent core data models, an offline
+cross-bookmaker arbitrage engine and historical paper replay are implemented:
 an installable `src/` package, typed environment configuration, validated odds
 records, synthetic JSON fixtures, offline tests, linting, formatting, strict type
 checking and Linux/Windows CI. The application **cannot scan live odds yet**.
 The engine compares normalised prices and calculates hypothetical stakes and
-profits. There are no API requests, storage or dashboard.
-There is no bookmaker account integration, bet execution, continuous polling or
+profits. Historical replay adds a virtual bankroll and JSON/CSV reports.
+There are no API requests, database or dashboard.
+There is no bookmaker account integration, real bet execution, continuous polling or
 real-money transaction support.
 
 ## Setup
@@ -89,15 +90,16 @@ src/betting_scanner/
   core/models.py         # Validated provider-independent domain records
   providers/             # Future retrieval and normalisation
   strategies/arbitrage/  # Selection, Decimal mathematics and typed results
+  backtesting/          # Historical readers, replay, execution, settlement, reports
   storage/               # Future persistence
-  interfaces/            # Future commands, dashboards and alerts
+  interfaces/backtest.py # Historical replay command line
 tests/test_config.py     # Offline configuration tests
 tests/test_models.py     # Domain validation and fixture tests
 tests/test_arbitrage.py  # Selection, verification, mathematics and penny allocation
 tests/fixtures/          # Eight deterministic synthetic JSON scenarios
 ```
 
-Providers, storage and interfaces remain placeholders. Dependency boundaries:
+Providers and storage remain placeholders. Dependency boundaries:
 
 - **Core** is independent of providers and contains no tennis-specific assumptions.
 - **Providers** adapt external data into shared domain concepts. Strategies must
@@ -336,10 +338,171 @@ no completeness, settlement or freshness claims; use the detection pipeline for
 eligibility classification. Results round-trip with `model_dump_json()` and
 `ArbitrageResult.model_validate_json()`.
 
+## Historical replay and paper trading
+
+Run a fictional history from the repository root:
+
+```sh
+uv sync --locked
+uv run betting-backtest tests/fixtures/histories/a_success.json --bankroll 1000 --stake 100 --min-roi 0 --output-dir backtest-output/success
+```
+
+Equivalent module command: `uv run python -m betting_scanner.interfaces.backtest
+tests/fixtures/histories/a_success.json` (enter on one line). No credentials or
+network access are needed. The terminal summary and generated files distinguish
+detected candidates, threshold-qualified opportunities, attempted/full/partial/
+failed executions, settled positions and unsettled exposure.
+
+Defaults are £1,000 starting cash, £100 per opportunity, £100 maximum exposure per
+event, £500 aggregate exposure, zero execution delay, zero minimum ROI/profit,
+and a 0.5% adverse haircut to decimal prices. ROI thresholds use **rounded
+worst-case ROI**, and a strictly positive rounded profit is always required.
+The baseline assumes all submitted legs are accepted; this is a simulation
+assumption, not evidence of acceptance. Unknown data and observation gaps fail
+closed, and prices/payouts are conservatively adjusted. Stress the baseline with:
+
+```sh
+uv run betting-backtest tests/fixtures/histories/f_price_change.json --execution-delay 10 --output-dir backtest-output/delayed
+uv run betting-backtest tests/fixtures/histories/g_bankroll.json --bankroll 100 --output-dir backtest-output/limited
+uv run betting-backtest tests/fixtures/histories/a_success.json --reject-last --slippage 0.01 --min-profit 1 --max-event-exposure 100 --max-aggregate-exposure 200 --output-dir backtest-output/stress
+```
+
+All flags accept GBP amounts or percentages as decimal strings; `--slippage` is a
+fraction (0.005 = 0.5%), and `--execution-delay` is integer seconds. Available
+per-bet bookmaker minimum/maximum stakes can be supplied through the Python API:
+
+```python
+from decimal import Decimal
+from pathlib import Path
+from betting_scanner.backtesting.models import ReplayConfig, StakeLimits
+from betting_scanner.backtesting.reader import JsonHistoricalReader
+from betting_scanner.backtesting.replay import run_replay
+
+dataset = JsonHistoricalReader(Path("tests/fixtures/histories/a_success.json")).read()
+report = run_replay(
+    dataset,
+    ReplayConfig(bookmaker_limits={"book-1": StakeLimits(maximum=Decimal("10.00"))}),
+)
+```
+
+### Chronology and execution assumptions
+
+The reader returns `HistoricalDataset`: full event snapshots with explicit
+`observed_at` timestamps, separately observed per-bet settlement evidence, and
+optional synthetic execution instructions. Replay sorts records chronologically
+and uses an injected `ReplayClock`, never the wall clock. Quotes collected after
+an observation are recorded as unavailable and excluded. At each step the
+existing arbitrage engine evaluates the known snapshot with the configured
+provider-update freshness limit. Missing update times remain unverified.
+
+Each snapshot **replaces** the event's state; absent quotes are never carried
+forward. Delayed orders require a new full observation at the exact due time;
+otherwise they fail with `no_execution_observation`. A later observation is not
+used retroactively. For example, the brief fixture loses its opportunity after
+one second; with a ten-second delay there is no execution confirmation. The
+changing-price fixture has an observation at ten seconds, so the revised prices
+are checked then and the attempt fails preflight.
+
+Execution confirms the originally selected bookmakers/outcomes and settlement
+contracts, reapplies the existing engine to those prices after the haircut, and
+checks the fixed decision-time stakes at the new prices. It does not silently
+replace submitted stakes with a more favourable allocation. Cash, event and total
+exposure are checked before any fill. Successful confirmations may still have
+individual rejections through instructions, `reject_last`, or supplied stake
+limits. Partial fills deduct only accepted stakes and retain explicit one-sided
+exposure; they have no guaranteed arbitrage payout. Failed attempts deduct nothing.
+Pending orders reserve no cash, so simultaneous orders compete deterministically
+for available funds at execution.
+
+Unchanged combinations of canonical market definition, selected bookmaker/provider,
+outcome, price and rule records are counted/entered once per replay, regardless of
+refreshed quote timestamps. This deliberately suppresses retries of the same
+combination after failed execution or later reappearance. Price/rule changes may
+create a new opportunity, still subject to exposure limits.
+
+### Settlement, accounting and metrics
+
+Historical results must explicitly state won/lost/void, observation time, source
+(`synthetic` or `historical`) and the applicable verified settlement rule for each
+bookmaker/outcome. No outcomes or retirement adjudications are invented. Rules
+must match the accepted quote's full verified contract, and evidence must be
+observed after the event start known at execution. Missing or incompatible
+evidence leaves positions unsettled.
+
+Conservatively, all accepted legs must have valid observed results before any
+position payout or realised P&L is credited. Wins pay accepted price × stake,
+rounded down to pennies; losses pay zero; voids refund the accepted stake. Rejected
+legs are `not_placed`. Incomplete positions stay at cost, with zero unrealised P&L:
+`equity_at_cost = cash + open accepted stakes`. This is an accounting convention,
+not a liquidation value or guarantee of recovering one-sided stakes.
+
+Reports include snapshot/event counts, unique mathematical candidates and eligible
+opportunities, execution outcomes, settled/unsettled counts, theoretical and
+realised ROI, accepted stakes, realised P&L, exposure, ending cash/equity, drawdown
+and largest settled loss. Average theoretical ROI is the arithmetic mean over
+unique threshold-qualified opportunities; average realised ROI is the arithmetic
+mean of settled-position P&L / accepted stake (including partial fills). Empty
+averages are `null`/`n/a`. Drawdown is the largest peak-to-trough decrease in
+chronological equity at cost; it does not mark open bets to market. Returns are
+not annualised and no Sharpe ratio is reported.
+
+The success example above produces:
+
+```text
+Snapshots / events: 1 / 1
+Candidates / eligible: 1 / 1
+Attempts / full / partial / failed: 1 / 1 / 0 / 0
+Accepted stakes: GBP 100.00
+Realised hypothetical P&L: GBP 14.20
+Ending cash / equity at cost: GBP 1014.20 / GBP 1014.20
+```
+
+The 0.5% price haircut explains the difference from the £14.77 no-slippage
+arbitrage example. The rejection fixture loses £47.83 on its accepted losing leg;
+the incomplete-result fixture has £900 cash, £100 unsettled stakes and zero
+realised profit. These are fictional results, not backtested real bookmaker returns.
+
+### Reports, tests and future readers
+
+Each run writes `report.json` (full typed report), `trades.csv` (one row per planned
+leg, including rejections, actual fill prices and settlement sources), and
+`bankroll.csv` (chronological cash, open stake and equity). Position P&L appears
+only once per trade in the CSV. Reusing an output directory replaces these three
+files. Default output under `backtest-output/` is ignored by Git; use an ignored
+or external directory for custom output.
+
+Ten synthetic histories cover success, no arbitrage, brief availability, stale
+updates, rejection, price changes, limited funds, incompatible rules, incomplete
+results and repeated observations. See [history scenarios](tests/fixtures/histories/README.md).
+Run focused checks:
+
+```sh
+uv run pytest tests/test_backtesting.py tests/test_arbitrage.py
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+```
+
+`HistoricalReader.read() -> HistoricalDataset` is the minimal adapter contract.
+Only a local JSON reader is implemented. Future The Odds API, other-provider or
+locally recorded-data readers must supply stable canonical event/market/outcome
+IDs, competition/participants, exact Decimal prices, original provider update
+times (or explicit missing values), local observation/collection times, complete
+outcome definitions and settlement verification. Meaningful performance claims
+also need reliable result/adjudication evidence and realistic price availability,
+bookmaker stake limits, latency and acceptance data. Historical snapshots alone
+cannot establish that quoted prices were executable.
+
+The in-memory implementation is intended for small normalised histories. It does
+not consume provider-specific JSON, merge delta streams, reconcile settlement
+corrections, infer rules, apply fees/taxes, or model real order books. Duplicate
+event observations at a timestamp, conflicting current offers and duplicate or
+corrected settlement records are rejected. No live adapters are implemented.
+
 ## Planned scope and limitations
 
-Subsequent tasks will add live odds retrieval, historical observations and a
-dashboard. None of those features exists today. The current engine uses supplied
+Subsequent tasks will add provider adapters, live odds retrieval, database storage
+and a dashboard. None of those features exists today. The current engine uses supplied
 normalised data and synthetic fixtures only. It does not place bets or run polling
 or background jobs.
 
