@@ -1,0 +1,77 @@
+{
+  "timestamp": "2024-07-01T12:00:00Z",
+  "previous_timestamp": "2024-07-01T11:55:00Z",
+  "next_timestamp": "2024-07-01T12:05:00Z",
+  "data": [
+    {
+      "id": "fictional-provider-event-01",
+      "sport_key": "tennis_atp_fictional_open",
+      "sport_title": "Fictional ATP Open",
+      "commence_time": "2024-07-01T14:00:00Z",
+      "home_team": "Fictional Ada Ace",
+      "away_team": "Fictional Bea Baseline",
+      "bookmakers": [
+        {
+          "key": "fictional_one",
+          "title": "Fictional One",
+          "last_update": "2024-07-01T11:59:00Z",
+          "markets": [
+            {
+              "key": "h2h",
+              "outcomes": [
+                {
+                  "name": "Fictional Ada Ace",
+                  "price": 2.20
+                },
+                {
+                  "name": "Fictional Bea Baseline",
+                  "price": 1.80
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "fictional_two",
+          "title": "Fictional Two",
+          "last_update": "2024-07-01T11:59:00Z",
+          "markets": [
+            {
+              "key": "h2h",
+              "outcomes": [
+                {
+                  "name": "Fictional Ada Ace",
+                  "price": 1.85
+                },
+                {
+                  "name": "Fictional Bea Baseline",
+                  "price": 2.40
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "fictional_three",
+          "title": "Fictional Three",
+          "last_update": "2024-07-01T11:59:00Z",
+          "markets": [
+            {
+              "key": "h2h",
+              "outcomes": [
+                {
+                  "name": "Fictional Ada Ace",
+                  "price": 1.90
+                },
+                {
+                  "name": "Fictional Bea Baseline",
+                  "price": 1.90
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

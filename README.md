@@ -14,7 +14,8 @@ records, synthetic JSON fixtures, offline tests, linting, formatting, strict typ
 checking and Linux/Windows CI. The application **cannot scan live odds yet**.
 The engine compares normalised prices and calculates hypothetical stakes and
 profits. Historical replay adds a virtual bankroll and JSON/CSV reports.
-There are no API requests, database or dashboard.
+Explicit historical API discovery/download commands are available; no database
+or dashboard is implemented. Backtesting cached datasets remains fully offline.
 There is no bookmaker account integration, real bet execution, continuous polling or
 real-money transaction support.
 
@@ -30,9 +31,10 @@ uv run python -c "import betting_scanner"
 ```
 
 uv creates `.venv` and installs the package in editable mode. `uv.lock` pins the
-dependency resolution. The build backend is pinned Hatchling. Pydantic v2 is the
-only direct runtime dependency, for validation and JSON serialisation of domain
-models. Development tools are pytest, Ruff and mypy.
+dependency resolution. The build backend is pinned Hatchling. Pydantic v2 is a
+runtime dependency for validation and JSON serialisation of domain models. HTTPX
+handles explicitly invoked historical requests. Development tools are pytest,
+Ruff and mypy.
 
 ## Configuration
 
@@ -88,7 +90,7 @@ Python 3.12 on Linux and Windows, with SHA-pinned actions and the committed lock
 src/betting_scanner/
   config.py              # Implemented typed settings
   core/models.py         # Validated provider-independent domain records
-  providers/             # Future retrieval and normalisation
+  providers/odds_api/    # Historical client, normalisation, cache and reader
   strategies/arbitrage/  # Selection, Decimal mathematics and typed results
   backtesting/          # Historical readers, replay, execution, settlement, reports
   storage/               # Future persistence
@@ -99,7 +101,7 @@ tests/test_arbitrage.py  # Selection, verification, mathematics and penny alloca
 tests/fixtures/          # Eight deterministic synthetic JSON scenarios
 ```
 
-Providers and storage remain placeholders. Dependency boundaries:
+Storage remains a placeholder. Dependency boundaries:
 
 - **Core** is independent of providers and contains no tennis-specific assumptions.
 - **Providers** adapt external data into shared domain concepts. Strategies must
@@ -139,7 +141,8 @@ Pydantic's validation-bypassing `model_construct` or unchecked `model_copy` upda
 
 Providers will translate their own JSON into these records. Strategies will consume
 the same normalised records regardless of provider, so changing a provider does
-not change the calculations. No provider parser is implemented yet.
+not change the calculations. The Odds API historical adapter implements this
+translation without duplicating strategy calculations.
 
 ### Outcome definition and quote coverage
 
@@ -189,7 +192,10 @@ For metadata, encode precision-sensitive numbers as strings as well.
 Event start, optional provider update and required collection time are distinct.
 Datetime objects must be timezone-aware; ISO 8601 strings must include an offset.
 Numeric epoch inputs and naive datetimes are rejected. Accepted timestamps are
-normalised to UTC and serialised with `Z`. Missing provider timestamps remain
+normalised to UTC and serialised with `Z`. Historical quotes additionally retain
+`observed_at`, the archive availability time, separately from `collected_at`,
+the local download time. Replay uses archive evidence when present; legacy/local
+observations continue to use collection time. Missing provider timestamps remain
 `None`; recent collection does not imply a fresh provider update. Engine freshness
 thresholds are described below; the core model itself does not classify freshness.
 
@@ -390,8 +396,9 @@ report = run_replay(
 The reader returns `HistoricalDataset`: full event snapshots with explicit
 `observed_at` timestamps, separately observed per-bet settlement evidence, and
 optional synthetic execution instructions. Replay sorts records chronologically
-and uses an injected `ReplayClock`, never the wall clock. Quotes collected after
-an observation are recorded as unavailable and excluded. At each step the
+and uses an injected `ReplayClock`, never the wall clock. Quotes whose archive
+observation (or collection time for local recordings) is after a replay step are
+recorded as unavailable and excluded. At each step the
 existing arbitrage engine evaluates the known snapshot with the configured
 provider-update freshness limit. Missing update times remain unverified.
 
@@ -484,8 +491,8 @@ uv run mypy src
 ```
 
 `HistoricalReader.read() -> HistoricalDataset` is the minimal adapter contract.
-Only a local JSON reader is implemented. Future The Odds API, other-provider or
-locally recorded-data readers must supply stable canonical event/market/outcome
+Local JSON and downloaded The Odds API directory readers are implemented.
+Future other-provider or locally recorded-data readers must supply stable event/market/outcome
 IDs, competition/participants, exact Decimal prices, original provider update
 times (or explicit missing values), local observation/collection times, complete
 outcome definitions and settlement verification. Meaningful performance claims
@@ -499,11 +506,192 @@ corrections, infer rules, apply fees/taxes, or model real order books. Duplicate
 event observations at a timestamp, conflicting current offers and duplicate or
 corrected settlement records are rejected. No live adapters are implemented.
 
+## The Odds API historical tennis integration
+
+Obtain a key through [The Odds API](https://the-odds-api.com/) and set
+`ODDS_API_KEY` in your shell or secret manager. In PowerShell, enter it without
+putting the credential in command history:
+
+```powershell
+$env:ODDS_API_KEY = Read-Host "The Odds API key" -MaskInput
+```
+
+For older PowerShell versions, set the environment variable using your preferred
+secret manager. `.env` is not automatically loaded. Never place credentials in
+CLI arguments, data files or Git. The client authenticates using the documented
+`x-api-key` header, suppresses underlying HTTP error details, redacts credentials
+from stored response bodies and only retains selected response headers. It does
+not follow redirects. Timeout defaults to 20 seconds; `--timeout` and `--retries`
+are global options placed **before** the subcommand.
+
+### Coverage and costs
+
+The [official historical guide](https://the-odds-api.com/historical-odds-data/)
+describes five-minute featured-market snapshots from September 2022 (earlier
+coverage starts June 2020 at ten-minute intervals). A response resolves to the
+closest snapshot at or before the requested date and includes neighbouring times.
+Historical odds require a paid plan. A free-plan key can query historical events,
+but that is not a zero-credit operation.
+
+Per the [v4 endpoint documentation](https://the-odds-api.com/liveapi/guides/v4/),
+the sports listing costs zero credits; dated event discovery costs up to one;
+historical odds cost up to ten per region/market, with empty responses uncharged.
+This implementation requests exactly one region and `h2h` market. It estimates
+retry-inclusive upper bounds and records the returned quota headers. Access and
+coverage are separate: current listings and dated event counts do not establish
+UK bookmaker/h2h prices, and availability varies by competition/date.
+
+Discovery gets ATP/WTA keys dynamically from `/sports?all=true`:
+
+```powershell
+uv run betting-history discover --sport tennis --date 2024-07-01T12:00:00Z
+```
+
+This only fetches the free current listing and prints the discovery cost. Copy a
+key from the listing; no permanent competition list is hardcoded. Explicitly
+investigate **one** competition at the selected date:
+
+```powershell
+$sportKey = Read-Host "ATP/WTA sport key from discovery"
+uv run betting-history discover --sport-key $sportKey --date 2024-07-01T12:00:00Z --max-credits 2 --execute
+```
+
+`historical=not checked` in the listing is distinct from a dated event count. A
+zero count or an unavailable competition is reported without inventing coverage.
+Keys absent from today's listing may be supplied explicitly for investigation;
+the API, not the key's spelling, determines whether history exists. Discovery
+never loops over all competitions making chargeable calls.
+
+### Worked small download
+
+After checking a key/date, estimate a three-point, ten-minute range:
+
+```powershell
+uv run betting-history estimate --sport-key $sportKey --start 2024-07-01T12:00:00Z --end 2024-07-01T12:10:00Z --interval 5m --region uk
+uv run betting-history download --sport-key $sportKey --start 2024-07-01T12:00:00Z --end 2024-07-01T12:10:00Z --interval 5m --region uk --output-dir data/tennis-history --max-credits 60
+```
+
+Both commands perform **no HTTP requests and write no files**. They need no key.
+The range is inclusive, so there are three requested dates. The base bound is
+30 credits; the default one retry per request gives a 60-credit upper bound.
+Cache hits and empty responses may reduce actual cost. Disable retries with
+`uv run betting-history --retries 0 estimate ...` to estimate the base bound.
+
+Only this explicit opt-in performs paid historical requests:
+
+```powershell
+uv run betting-history download --sport-key $sportKey --start 2024-07-01T12:00:00Z --end 2024-07-01T12:10:00Z --interval 5m --region uk --output-dir data/tennis-history --max-credits 60 --execute
+```
+
+These commands demonstrate syntax, not a claim that the selected competition has
+coverage on that date. Change the date after investigating actual coverage. Paid
+access has been tested with mocked responses, not a real subscription in this task.
+
+Downloads are capped at 100 requested dates per dataset, use intervals of at least
+five minutes, and accept only single-region decimal `h2h` odds. No interpolation,
+pagination loop or automatic bulk discovery is performed. Transient 429/500/502/
+503/504 responses have bounded retries/backoff. Ambiguous transport timeouts,
+authentication and access errors are not retried.
+
+Every HTTP attempt reserves its documented maximum cost in an atomic journal
+**before** sending. Reported `x-requests-last` replaces that reservation; absent
+headers leave a conservative accounted charge and `actual_api_credits=null`,
+not a fabricated zero. The cap includes retries and all earlier attempts in this
+dataset. If the provider reports an unexpectedly larger charge, the downloader
+records it and stops immediately; it cannot undo a charge the API already made.
+
+Rerun the identical command/directory to resume; the cap may be increased. Cached
+requests are not repeated. Provider `next_timestamp` references can prove that
+another requested date maps to the same cached observation, avoiding a request.
+An OS file lock prevents concurrent writers. Interrupted in-flight requests with
+no saved response stay `uncertain` and are not automatically resubmitted, because
+they may already have consumed credits. Review those cases against your API
+usage before deliberately starting another dataset. A different range, region,
+market or competition requires a different output directory.
+
+### Cache, identity and offline replay
+
+The ignored `data/` directory contains:
+
+```text
+data/tennis-history/
+  manifest.json  # Version, plan, collection times, counts, gaps, missing slots, quota journal
+  raw/           # Sanitised original response text plus status, quota and request metadata
+  replay.json    # Unique normalised event snapshots, if any valid events exist
+```
+
+One raw receipt is kept per performed request for auditing; repeated actual
+snapshot/event pairs appear once in replay data. Conflicting payloads for the
+same actual timestamp are rejected. Missing prices and empty/invalid responses
+are recorded, never filled in. Manifest gaps refer to returned observation times;
+`missing_snapshots` separately identifies empty, failed, uncertain and unrequested
+slots. Snapshot counts are unique replayable provider times, event counts are
+unique internal events, and quote counts include each event observation.
+
+Provider event references and competition keys determine stable internal event
+IDs. Player IDs are explicitly **event-scoped**, derived from the event and
+normalised source label because this response does not provide global player IDs.
+Outcome IDs are anchored to those participant and market IDs, not array order.
+Names alone never merge separate events. Only unambiguous `h2h` participant
+selections are normalised; lay, handicap and period markets are not relabelled.
+Malformed/ambiguous events are rejected with structured normalisation issues.
+
+Actual snapshot time becomes `HistoricalSnapshot.observed_at` and quote
+`observed_at`. Requested time and local download time remain separate metadata;
+quote `collected_at` is the genuine local download time. A market-specific update
+is used when supplied; otherwise the bookmaker update is used. Both original
+update fields are preserved, and missing updates stay missing. Downloading in
+2026 does not move a 2024 observation into 2026, nor does requesting 12:02 invent
+an observation if the API returned 12:00.
+
+Run the saved data with no credentials or network calls:
+
+```powershell
+uv run betting-backtest data/tennis-history --bankroll 1000 --stake 100 --output-dir backtest-output/real-history
+uv run betting-backtest data/tennis-history --bankroll 500 --stake 10 --min-roi 1 --execution-delay 30 --output-dir backtest-output/risk-comparison
+```
+
+The existing arbitrage and replay algorithms are reused. Historical availability
+time is checked instead of download time; legacy fixtures retain their original
+collection-time behaviour. Five-minute observations cannot verify a fill thirty
+seconds later. Strict exact-time execution confirmation remains unchanged; such
+attempts fail with `no_execution_observation` rather than carrying prices forward.
+
+Crucially, the odds endpoint does not verify event status, exclusivity/
+exhaustiveness, market period or bookmaker settlement policies. These fields
+remain unknown/unverified. Valid complete prices can produce **mathematical
+candidates**, but the downloaded data alone produces no eligible paper fills or
+realised profit. The mocked three-book example produces one candidate, zero
+execution attempts and an unchanged £1,000 cash balance. This is not a fill study.
+
+No final results are inferred from price movements. Optional separate adjudicated
+result evidence uses the existing `SettlementRecord` schema:
+
+```powershell
+uv run betting-backtest data/tennis-history --results data/results.json --output-dir backtest-output/with-results
+```
+
+The file is a JSON array with canonical event/market/bookmaker/outcome IDs,
+observation time, won/lost/void disposition, explicit historical/synthetic source,
+and verified compatible rule evidence. Adding results does not manufacture the
+missing execution/settlement verification of an odds-only dataset. Existing
+synthetic settlement fixtures remain supported. Missing or mismatched evidence
+leaves accepted positions unsettled, with exposure separate from realised P&L.
+
+Run provider and integration tests entirely offline:
+
+```sh
+uv run pytest tests/test_odds_api.py tests/test_backtesting.py tests/test_arbitrage.py
+```
+
+They use [fictional provider responses](tests/fixtures/odds_api/README.md) and
+HTTPX MockTransport; there are no automatically run paid/live tests.
+
 ## Planned scope and limitations
 
-Subsequent tasks will add provider adapters, live odds retrieval, database storage
+Subsequent tasks may add other provider adapters, live odds retrieval, database storage
 and a dashboard. None of those features exists today. The current engine uses supplied
-normalised data and synthetic fixtures only. It does not place bets or run polling
+normalised data, cached historical datasets and synthetic fixtures. It does not place bets or run polling
 or background jobs.
 
 The models and engine already support synthetic three-way football examples.

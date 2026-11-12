@@ -239,6 +239,8 @@ class OddsQuote(DomainModel):
     decimal_odds: DecimalOdds
     provider_updated_at: UTCTimestamp | None = None
     collected_at: UTCTimestamp
+    # Historical availability evidence is distinct from downloading an archive now.
+    observed_at: UTCTimestamp | None = None
     settlement_rule: SettlementRule = Field(default_factory=SettlementRule)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 

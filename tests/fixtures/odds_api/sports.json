@@ -1,0 +1,23 @@
+[
+  {
+    "key": "tennis_atp_fictional_open",
+    "group": "Tennis",
+    "title": "Fictional ATP Open",
+    "active": false,
+    "has_outrights": false
+  },
+  {
+    "key": "tennis_wta_fictional_open",
+    "group": "Tennis",
+    "title": "Fictional WTA Open",
+    "active": true,
+    "has_outrights": false
+  },
+  {
+    "key": "soccer_fictional",
+    "group": "Soccer",
+    "title": "Fictional Football",
+    "active": true,
+    "has_outrights": false
+  }
+]

@@ -195,11 +195,13 @@ def detect_arbitrage(
         if quote.market_id != market_id:
             continue
         updated = quote.provider_updated_at
-        if quote.collected_at > evaluated_at + config.clock_skew_tolerance:
+        if (
+            quote.observed_at or quote.collected_at
+        ) > evaluated_at + config.clock_skew_tolerance:
             reasons.append(
                 _issue(
                     ReasonCode.FUTURE_QUOTE,
-                    "Collection time exceeds allowed clock skew.",
+                    "Quote availability time exceeds allowed clock skew.",
                     quote,
                 )
             )

@@ -9,11 +9,13 @@ description = "Modular sports betting market analysis foundations"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "httpx>=0.28,<1",
     "pydantic>=2,<3",
 ]
 
 [project.scripts]
 betting-backtest = "betting_scanner.interfaces.backtest:main"
+betting-history = "betting_scanner.interfaces.history:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3,<10", "ruff>=0.11,<1", "mypy>=1.15,<2"]

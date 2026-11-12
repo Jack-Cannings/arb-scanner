@@ -79,11 +79,13 @@ def _fingerprint(
 def _available(
     record: HistoricalSnapshot, now: datetime
 ) -> tuple[OddsSnapshot, tuple[str, ...]]:
-    known = [q for q in record.snapshot.quotes if q.collected_at <= now]
+    known = [
+        q for q in record.snapshot.quotes if (q.observed_at or q.collected_at) <= now
+    ]
     unavailable = tuple(
         f"unobserved_quote:{q.bookmaker_id}:{q.outcome_id}"
         for q in record.snapshot.quotes
-        if q.collected_at > now
+        if (q.observed_at or q.collected_at) > now
     )
     data = record.snapshot.model_dump()
     data["quotes"] = tuple(q.model_dump() for q in known)
