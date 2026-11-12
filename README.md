@@ -994,6 +994,120 @@ uv run mypy src
 The tests inject wall and monotonic clocks, mock HTTP and advance simulated time
 instead of sleeping. No dependencies or betting strategies were added.
 
+## Historical tennis CSV research (offline)
+
+Keep the downloaded files at `data/historical-imports/atp_matches_2025.csv`
+and `data/historical-imports/wta_matches_2025.csv`. The entire `data/` directory
+is ignored. Raw files are read without modification; reports retain their SHA-256
+hashes, exact headers, source filenames, CSV line numbers and original cell values.
+No API key or network access is used.
+
+```powershell
+uv run betting-research analyse data/historical-imports --stake 100
+uv run betting-research analyse data/historical-imports --tour atp --stake 100 --min-roi 1 --output-dir data/research-output/atp
+uv run betting-research analyse data/historical-imports --tour wta --stake 0.03 --output-dir data/research-output/wta
+```
+
+`--tour` accepts `atp`, `wta` or `both` (default). Stake is a positive GBP
+amount in whole pennies; minimum ROI is a finite nonnegative percentage.
+The selected tour's file must exist and have the required schema. Invalid
+schemas fail with an error; invalid records are exported with rejection reasons.
+Header-only files produce valid empty reports. Reports replace the same output
+filenames on subsequent runs, so use separate output directories to retain runs.
+
+### Actual downloaded schema
+
+Both inspected CSVs have the same 61 columns. Fields used for research are:
+
+| Source fields | Meaning and handling |
+| --- | --- |
+| `match_id` | Match identifier, scoped by ATP/WTA |
+| `tourney_id`, `tourney_name`, `match_num` | Competition identity/name and secondary match identity |
+| `tourney_date` | Required tournament date in YYYYMMDD format; not assumed to be each match's date |
+| `start_time_utc` | Optional timezone-aware match start, converted to UTC; never an odds observation time |
+| `winner_id`, `winner_name`, `loser_id`, `loser_name` | Required participant identities and result-labelled names |
+| `score` | Result text, retained without using it to settle or predict anything |
+| `winner_best_close_odds`, `loser_best_close_odds` | Required finite Decimal prices strictly greater than one; sole price inputs |
+| `bookmakers` | Numeric count-looking field; no bookmaker names or individual prices are supplied |
+| `winner_open_prob`, `winner_close_prob`, `winner_close_fair_odds`, `loser_close_fair_odds`, `margin_pct` | Retained raw; probabilities/fair prices are not substituted for quoted odds |
+
+Other columns contain surface, draw size/level, player seed/entry/hand/height/
+country/age/rank/points, best-of/round/duration and winner/loser serve statistics.
+The report lists every original header. All original values survive normalisation.
+There is no quote collection timestamp, bookmaker identity or settlement-rule
+evidence in these files. The importer deliberately uses a separate research
+model rather than constructing `OddsQuote` records with invented metadata.
+
+Missing required values, malformed row widths, invalid prices/dates/identifiers
+and identical participant IDs are skipped. Exact duplicate rows are counted
+once. Conflicting copies of a match ID or `(tourney_id, match_num)` within a tour
+are all rejected, even when one copy has bad prices. Cross-tour identifiers
+remain independent. Distinct source IDs cannot always establish whether two
+records describe the same real-world match; no fuzzy merging is attempted.
+
+### Calculations and interpretation
+
+Closing prices describe the source's labelled end-of-market prices; their
+collection method is unknown. They are not equivalent to simultaneously
+executable bookmaker quotations. The shared pure arbitrage calculator evaluates
+`S = 1 / winner_odds + 1 / loser_odds`, with exact cross-products for the
+`S < 1` classification. Theoretical ROI is `(1 / S - 1) * 100` percent.
+Ideal stakes equalise the two payouts. The existing deterministic penny
+allocator maximises the minimum payout, spends the whole budget and floors
+payouts to pennies. A mathematical candidate can lose its profit after rounding,
+especially for tiny budgets; it is still reported with its actual rounded result.
+
+Exports in `data/research-output/` by default:
+
+- `report.json`: complete normalised and original records, input schema/hashes,
+  skipped reasons, quality counts/examples, calculations, configuration and
+  limitations. Decimal values are JSON strings to retain precision.
+- `candidates.csv`: selected mathematical candidates, original odds, participant
+  IDs, ideal and penny allocations, theoretical and rounded returns, warnings,
+  unverified status and original cells. No trades or realised returns.
+- `skipped.csv`: rejected/duplicate records, source line, reasons and original cells.
+
+Metrics after `--min-roi` filtering describe selected candidates; candidate
+percentage uses all valid matches as denominator. The pre-filter mathematical
+count is also retained. Empty selections have zero aggregate ROI/profit.
+Summed theoretical profit is explicitly a **non-realistic conditional upper
+bound assuming every candidate was executable**. It is not a trading return,
+bankroll simulation, guaranteed profit bound or proof of available liquidity.
+
+Quality findings flag missing/invalid odds, duplicates, player-name/ID variants,
+tournament naming variants, missing results/start times and prices of at least
+100. Candidate ROI of at least 10% additionally prompts source review; these
+thresholds are review heuristics, not rejection rules. Unusual profitable rows
+remain in the report. Winner/loser labels and scores contain future information:
+this symmetric algebra is not a predictive backtest. There is no freshness,
+simultaneity, acceptance, stake limit, commission, retirement-rule or execution
+delay evidence. Every candidate remains unverified and unexecuted and is never
+sent into the paper-trading engine.
+
+The inspected files' original source and licence are **unknown**. The filename
+and column layout do not establish attribution or redistribution rights. Record
+the download URL, retrieval date, publisher, licence and required attribution
+before distributing data. Neither downloads nor generated reports are committed.
+
+The supplied downloads contain 3,001 ATP and 2,911 WTA rows. The reference run
+analysed 2,949 ATP and 2,840 WTA matches, skipping 121 missing-price rows and two
+WTA rows with a price of 1.0. It found 1,349 unverified mathematical candidates
+(23.3028%); average ROI 8.3982%, highest 444%. At GBP 100 per candidate the summed
+hypothetical profit was GBP 11,329.18, subject to all the limitations above.
+Some 2025-file matches start in December 2024; they are flagged, not silently
+filtered out. Very large apparent returns warrant checking the original source.
+
+```powershell
+uv run pytest tests/test_research.py tests/test_arbitrage.py tests/test_backtesting.py
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+# Optional smoke test against the ignored local downloads:
+$env:RUN_LOCAL_CSV_SMOKE = "1"
+uv run pytest tests/test_research.py -k optional_local_smoke
+Remove-Item Env:RUN_LOCAL_CSV_SMOKE
+```
+
 ## Planned scope and limitations
 
 Subsequent tasks may add other provider adapters, database storage

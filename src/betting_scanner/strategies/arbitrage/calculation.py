@@ -1,10 +1,18 @@
 """Pure Decimal mathematics and deterministic optimal penny stake allocation."""
 
+from collections.abc import Mapping
 from decimal import ROUND_CEILING, ROUND_FLOOR, Context, Decimal, localcontext
 from math import prod
 
-from betting_scanner.core.models import OddsQuote
-from betting_scanner.strategies.arbitrage.results import ArbitrageCalculation, StakeLeg
+from pydantic import TypeAdapter
+
+from betting_scanner.core.models import DecimalOdds, Identifier, OddsQuote
+from betting_scanner.strategies.arbitrage.results import (
+    ArbitrageCalculation,
+    PriceCalculation,
+    PriceStakeLeg,
+    StakeLeg,
+)
 
 PENNY = Decimal("0.01")
 ONE = Decimal(1)
@@ -87,7 +95,33 @@ def calculate_arbitrage(
     if len({(q.event_id, q.market_id) for q in quotes}) != 1:
         raise ValueError("Selected quotes must share an event and canonical market")
     quotes = tuple(sorted(quotes, key=lambda q: q.outcome_id))
-    odds = tuple(q.decimal_odds for q in quotes)
+    numeric = calculate_prices(
+        {q.outcome_id: q.decimal_odds for q in quotes}, total_stake
+    )
+    return ArbitrageCalculation.model_validate(
+        {
+            **numeric.model_dump(exclude={"legs"}),
+            "legs": [
+                StakeLeg(
+                    quote=quote,
+                    **leg.model_dump(exclude={"outcome_id", "decimal_odds"}),
+                )
+                for quote, leg in zip(quotes, numeric.legs, strict=True)
+            ],
+        }
+    )
+
+
+def calculate_prices(
+    prices: Mapping[str, Decimal], total_stake: Decimal
+) -> PriceCalculation:
+    """Shared pure maths; prices alone do not establish executable opportunities."""
+    validate_budget(total_stake)
+    validated = TypeAdapter(dict[Identifier, DecimalOdds]).validate_python(dict(prices))
+    if len(validated) < 2:
+        raise ValueError("Select at least two distinct outcome identifiers")
+    ordered = sorted(validated.items())
+    odds = tuple(price for _, price in ordered)
     with localcontext(Context(prec=_precision((*odds, total_stake)))):
         denominator = prod(odds, start=ONE)
         numerators = tuple(
@@ -102,19 +136,20 @@ def calculate_arbitrage(
         ideal = tuple(total_stake * value / numerator for value in numerators)
         stakes = _penny_stakes(odds, total_stake, ideal, theoretical_payout)
         legs = tuple(
-            StakeLeg(
-                quote=quote,
+            PriceStakeLeg(
+                outcome_id=outcome_id,
+                decimal_odds=price,
                 ideal_stake=ideal_stake,
                 stake=stake,
-                raw_payout=stake * quote.decimal_odds,
-                payout=(stake * quote.decimal_odds).quantize(
-                    PENNY, rounding=ROUND_FLOOR
-                ),
+                raw_payout=stake * price,
+                payout=(stake * price).quantize(PENNY, rounding=ROUND_FLOOR),
             )
-            for quote, ideal_stake, stake in zip(quotes, ideal, stakes, strict=True)
+            for (outcome_id, price), ideal_stake, stake in zip(
+                ordered, ideal, stakes, strict=True
+            )
         )
         worst_payout = min(leg.payout for leg in legs)
-        return ArbitrageCalculation(
+        return PriceCalculation(
             reciprocal_sum=reciprocal_sum,
             mathematical_arbitrage=numerator < denominator,
             total_stake=total_stake.quantize(PENNY),

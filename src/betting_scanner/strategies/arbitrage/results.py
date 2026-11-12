@@ -62,6 +62,30 @@ class StakeLeg(DomainModel):
     payout: Decimal
 
 
+class PriceStakeLeg(DomainModel):
+    """Numeric research allocation with no invented quote metadata."""
+
+    outcome_id: Identifier
+    decimal_odds: Decimal
+    ideal_stake: Decimal
+    stake: Decimal
+    raw_payout: Decimal
+    payout: Decimal
+
+
+class PriceCalculation(DomainModel):
+    reciprocal_sum: Decimal
+    mathematical_arbitrage: bool
+    total_stake: Decimal
+    theoretical_payout: Decimal
+    theoretical_profit: Decimal
+    theoretical_roi: Decimal
+    legs: tuple[PriceStakeLeg, ...]
+    worst_case_payout: Decimal
+    worst_case_profit: Decimal
+    worst_case_roi: Decimal
+
+
 class ArbitrageCalculation(DomainModel):
     reciprocal_sum: Decimal
     mathematical_arbitrage: bool

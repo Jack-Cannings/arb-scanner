@@ -17,6 +17,7 @@ dependencies = [
 betting-backtest = "betting_scanner.interfaces.backtest:main"
 betting-history = "betting_scanner.interfaces.history:main"
 betting-live = "betting_scanner.interfaces.live:main"
+betting-research = "betting_scanner.interfaces.research:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3,<10", "ruff>=0.11,<1", "mypy>=1.15,<2"]

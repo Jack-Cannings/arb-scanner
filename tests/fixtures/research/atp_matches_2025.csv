@@ -1,0 +1,2 @@
+match_id,tourney_id,tourney_name,tourney_date,match_num,winner_id,winner_name,loser_id,loser_name,winner_best_close_odds,loser_best_close_odds,start_time_utc,score,bookmakers,winner_close_fair_odds,loser_close_fair_odds
+match1,2025-T1,Example Open,20250101,1,p1,Player A,p2,Player B,2.20,2.20,2025-01-02T12:00:00Z,6-3 6-4,18,1.2,8.0
