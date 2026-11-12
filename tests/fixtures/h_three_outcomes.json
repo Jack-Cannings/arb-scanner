@@ -87,7 +87,11 @@
           "outcome_type": "participant",
           "participant_id": "h-b"
         }
-      ]
+      ],
+      "mutually_exclusive": true,
+      "collectively_exhaustive": true,
+      "period": "regular_time",
+      "parameters": {}
     }
   ],
   "quotes": [

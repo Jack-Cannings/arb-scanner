@@ -165,6 +165,11 @@ class Market(DomainModel):
     # None explicitly means the expected outcome definition is unknown.
     expected_outcome_ids: Annotated[tuple[Identifier, ...], Field(min_length=1)] | None
     outcomes: tuple[Outcome, ...] = ()
+    # Evidence supplied by normalisation/review, never inferred from labels.
+    mutually_exclusive: bool = Field(default=False, strict=True)
+    collectively_exhaustive: bool = Field(default=False, strict=True)
+    period: Text | None = None
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_outcome_space(self) -> Self:

@@ -1,1 +1,1 @@
-"""Opportunity detection consuming normalised domain data (future)."""
+"""Opportunity detection consuming normalised domain data."""

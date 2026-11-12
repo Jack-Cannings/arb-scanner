@@ -80,7 +80,11 @@
           "outcome_type": "participant",
           "participant_id": "f-b"
         }
-      ]
+      ],
+      "mutually_exclusive": true,
+      "collectively_exhaustive": true,
+      "period": "full_match",
+      "parameters": {}
     }
   ],
   "quotes": [
@@ -179,7 +183,7 @@
       "bookmaker_id": "book-3",
       "market_id": "market-f",
       "outcome_id": "f-win-a",
-      "decimal_odds": "1.95",
+      "decimal_odds": "1.90",
       "provider_updated_at": "2026-06-01T11:59:00Z",
       "collected_at": "2026-06-01T12:00:00Z",
       "settlement_rule": {
@@ -201,7 +205,7 @@
       "bookmaker_id": "book-3",
       "market_id": "market-f",
       "outcome_id": "f-win-b",
-      "decimal_odds": "1.95",
+      "decimal_odds": "1.90",
       "provider_updated_at": "2026-06-01T11:59:00Z",
       "collected_at": "2026-06-01T12:00:00Z",
       "settlement_rule": {

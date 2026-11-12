@@ -80,7 +80,11 @@
           "outcome_type": "participant",
           "participant_id": "c-b"
         }
-      ]
+      ],
+      "mutually_exclusive": true,
+      "collectively_exhaustive": true,
+      "period": "full_match",
+      "parameters": {}
     }
   ],
   "quotes": [

@@ -7,11 +7,13 @@ be presented for manual investigation.
 
 ## Current implementation
 
-Project foundations and provider-independent core data models are implemented:
+Project foundations, provider-independent core data models and an offline
+cross-bookmaker arbitrage engine are implemented:
 an installable `src/` package, typed environment configuration, validated odds
 records, synthetic JSON fixtures, offline tests, linting, formatting, strict type
 checking and Linux/Windows CI. The application **cannot scan live odds yet**.
-There are no API requests, betting calculations, storage or dashboard.
+The engine compares normalised prices and calculates hypothetical stakes and
+profits. There are no API requests, storage or dashboard.
 There is no bookmaker account integration, bet execution, continuous polling or
 real-money transaction support.
 
@@ -86,15 +88,16 @@ src/betting_scanner/
   config.py              # Implemented typed settings
   core/models.py         # Validated provider-independent domain records
   providers/             # Future retrieval and normalisation
-  strategies/arbitrage/  # Future opportunity calculations
+  strategies/arbitrage/  # Selection, Decimal mathematics and typed results
   storage/               # Future persistence
   interfaces/            # Future commands, dashboards and alerts
 tests/test_config.py     # Offline configuration tests
 tests/test_models.py     # Domain validation and fixture tests
+tests/test_arbitrage.py  # Selection, verification, mathematics and penny allocation
 tests/fixtures/          # Eight deterministic synthetic JSON scenarios
 ```
 
-Providers, strategies, storage and interfaces remain placeholders. Dependency boundaries:
+Providers, storage and interfaces remain placeholders. Dependency boundaries:
 
 - **Core** is independent of providers and contains no tennis-specific assumptions.
 - **Providers** adapt external data into shared domain concepts. Strategies must
@@ -134,7 +137,7 @@ Pydantic's validation-bypassing `model_construct` or unchecked `model_copy` upda
 
 Providers will translate their own JSON into these records. Strategies will consume
 the same normalised records regardless of provider, so changing a provider does
-not change the calculations. No provider parser or strategy is implemented yet.
+not change the calculations. No provider parser is implemented yet.
 
 ### Outcome definition and quote coverage
 
@@ -146,7 +149,17 @@ unless the expected set is known. No market type imposes a two-outcome limit.
 
 Definition completeness is separate from quote coverage at each bookmaker. Fixture
 C defines both outcomes but has only one quote at one bookmaker. Snapshot validation
-allows this partial observation. Eligibility decisions belong to Prompt 3.
+allows this partial observation. The engine requires one selected quote per
+expected outcome across the combined books; individual books need not quote every
+outcome. If any outcome has no usable quote anywhere, detection is rejected.
+
+Markets also carry explicit `mutually_exclusive` and `collectively_exhaustive`
+verification flags (both default false), a `period` (default unknown), and a
+`parameters` mapping. A canonical market ID must identify the same event, type,
+period, parameters and outcome definitions for every quote referencing it.
+Normalisers/reviewers must establish that identity, never infer it from labels.
+This engine handles unparameterised match-winner and three-way-result markets;
+other types/parameters remain non-actionable. Distinct market IDs are never combined.
 
 ### Settlement evidence
 
@@ -158,8 +171,11 @@ and documentation; other documented rules require details even when unverified.
 
 Categories summarise only part of settlement behaviour. No rules are inferred from
 bookmaker names. Matching categories alone do not prove compatibility; unknown or
-unverified rules must never be classified as compatible. Rule evidence is retained
-for future strategy checks; no compatibility engine is implemented here.
+unverified rules must never be classified as compatible. The engine conservatively
+groups quotes only when the entire verified rule record matches: category,
+description and documentation. Different contracts are evaluated separately;
+similar rules expressed differently are not automatically reconciled. Producers
+are responsible for truthful verification and complete exact rule descriptions.
 
 ### Precision, timestamps and JSON
 
@@ -172,8 +188,8 @@ Event start, optional provider update and required collection time are distinct.
 Datetime objects must be timezone-aware; ISO 8601 strings must include an offset.
 Numeric epoch inputs and naive datetimes are rejected. Accepted timestamps are
 normalised to UTC and serialised with `Z`. Missing provider timestamps remain
-`None`; recent collection does not imply a fresh provider update. There are no
-freshness thresholds yet.
+`None`; recent collection does not imply a fresh provider update. Engine freshness
+thresholds are described below; the core model itself does not classify freshness.
 
 ```python
 from pathlib import Path
@@ -195,13 +211,140 @@ invalid odds, stale updates, differing rules, unknown rules and football with
 three outcomes. See [fixture descriptions](tests/fixtures/README.md). All data and
 rule evidence are fictional, fixed in time and loaded without network access.
 
+## Offline arbitrage engine
+
+For mutually exclusive, collectively exhaustive outcomes with decimal odds `O_i`,
+the reciprocal sum is `S = sum(1 / O_i)`. A strictly positive mathematical arbitrage
+requires `S < 1`. Break-even is not arbitrage. For budget `T`:
+
+```text
+ideal stake_i      = T * (1 / O_i) / S
+theoretical payout = T / S
+theoretical profit = T / S - T
+theoretical ROI %  = (1 / S - 1) * 100
+```
+
+All monetary calculations use Decimal in a private, input-sized precision context.
+Exact finite cross-products determine whether `S` is below one so recurring
+decimals do not misclassify exact break-even (including 3.00 / 3.00 / 3.00).
+Reported recurring values are finite Decimal approximations, with at least 60
+significant digits of working precision, independent of the caller's context.
+
+### Selection and verification
+
+`detect_arbitrage(snapshot, market_id, total_stake=..., evaluated_at=..., config=...)`
+revalidates normalised records and evaluates only the requested canonical market.
+It selects the highest price per outcome; equal prices prefer the lexicographically
+smallest bookmaker ID, then provider ID, then canonical quote JSON. It permits
+both selected outcomes to come from the same bookmaker. Within each compatible
+verified rule group it calculates a separate combination, retaining the one with
+the highest rounded worst-case profit, then theoretical profit. Remaining ties
+use stable rule-record ordering.
+
+`ArbitrageResult` separates:
+
+- `candidate`: the mathematical calculation from the best non-stale/non-future
+  quotes, potentially with unverified settlement rules or missing update times.
+- `eligible`: the best fully verified combination. Requires a scheduled event
+  starting after evaluation, a complete explicitly verified outcome space and
+  period, supported market scope, current provider timestamps and one verified
+  compatible settlement contract covering all outcomes.
+- `verification_status`, `market_eligible` and `actionability_status`: verification
+  is separate from profitability. A verified break-even market is not arbitrage.
+  Status `actionable` requires positive mathematical and rounded worst-case profit
+  with nonzero stakes on every outcome. `mathematical_candidate` retains positive
+  mathematics that fails verification or penny profitability.
+
+Each calculation retains selected quotes (including provider traceability and
+timestamps), ideal/rounded stakes, payouts and theoretical/rounded profit and ROI.
+Structured reason codes identify rejected input, missing outcomes, stale/future
+quotes, missing verification and rounding losses. Reasons may describe excluded
+quotes even when a different safe selection exists. Unknown/incomplete outcome
+definitions cannot support a calculation covering all possible outcomes and are
+rejected. Invalid caller budgets, evaluation times and configuration raise errors;
+invalid normalised records produce a structured rejection result.
+
+`EngineConfig` defaults to a five-minute provider update age and five-second clock
+skew tolerance. Both are configurable timedeltas. The supplied evaluation time
+must be timezone-aware and is normalised to UTC; no calculation reads the system
+clock. Age exactly at the threshold is allowed. Updates and collection times
+beyond the future skew limit are excluded. Missing update times are exploratory
+only: collection time is never substituted for bookmaker update time.
+
+### Penny stakes and worked example
+
+The budget must be a finite positive Decimal GBP amount in whole pennies.
+Initial ideal stakes follow the formula above. To optimise the rounded result,
+the allocator searches for the highest affordable whole-penny payout. A target
+of `p` payout pennies needs `ceil(p / O_i)` stake pennies per outcome. Monotone
+binary search finds the maximum feasible target; leftover pennies go to the
+largest ideal-stake shortfall, with outcome-ID order breaking ties. This spends
+the entire budget and maximises the worst-case payout in pennies, including for
+small budgets where simply rounding ideal stakes is insufficient.
+
+Raw payouts are retained. Payouts are also rounded **down** to pennies as a
+conservative modelling convention; worst-case profit and ROI use those penny
+payouts. A tiny theoretical margin can disappear, leaving a candidate rather
+than a profitable rounded combination.
+
+For 2.20 / 2.40 odds and a £100 budget:
+
+| Quantity | Value |
+| --- | --- |
+| Reciprocal sum | 1/2.20 + 1/2.40 = 115/132 ≈ 0.871212 |
+| Theoretical payout | £114.782608… |
+| Theoretical profit / ROI | £14.782608… / 14.782608…% |
+| Ideal stakes | £52.173913… / £47.826086… |
+| Allocated stakes | £52.17 / £47.83 (sum £100.00) |
+| Raw payouts | £114.774 / £114.792 |
+| Conservative penny payouts | £114.77 / £114.79 |
+| Rounded worst-case profit / ROI | £14.77 / 14.77% |
+
+These are hypothetical returns under supplied prices and verified modelled
+conditions, not actual realised profit or a guarantee of bookmaker acceptance.
+Minimum/maximum stakes, available liquidity, price changes and bookmaker-specific
+payout conventions are not implemented.
+
+Run the synthetic engine tests with `uv run pytest tests/test_arbitrage.py`, or
+all tests with `uv run pytest tests/`. The tests include two- and three-outcome
+arbitrage, no-arbitrage/break-even, unknown and differing settlement contracts,
+freshness boundaries, deterministic ties, recurring decimals, and exhaustive
+checks of the optimal penny allocation for small budgets.
+
+```python
+from datetime import UTC, datetime
+from decimal import Decimal
+from pathlib import Path
+from betting_scanner.core.models import OddsSnapshot
+from betting_scanner.strategies.arbitrage import detect_arbitrage
+
+snapshot = OddsSnapshot.model_validate_json(
+    Path("tests/fixtures/a_atp_candidate.json").read_text(encoding="utf-8")
+)
+result = detect_arbitrage(
+    snapshot,
+    snapshot.markets[0].id,
+    total_stake=Decimal("100.00"),
+    evaluated_at=datetime(2026, 6, 1, 12, tzinfo=UTC),
+)
+print(result.model_dump_json(indent=2))
+```
+
+`calculate_arbitrage(selected_quotes, total_stake)` is the pure low-level
+calculator. It validates unique outcome IDs and a common event/market but makes
+no completeness, settlement or freshness claims; use the detection pipeline for
+eligibility classification. Results round-trip with `model_dump_json()` and
+`ArbitrageResult.model_validate_json()`.
+
 ## Planned scope and limitations
 
-Subsequent tasks will add odds retrieval, cross-bookmaker comparison, arbitrage
-detection, stake and theoretical profit calculations, historical observations
-and a dashboard. None of these features exists today.
+Subsequent tasks will add live odds retrieval, historical observations and a
+dashboard. None of those features exists today. The current engine uses supplied
+normalised data and synthetic fixtures only. It does not place bets or run polling
+or background jobs.
 
-Longer-term possibilities include football, basketball, horse racing,
+The models and engine already support synthetic three-way football examples.
+Longer-term live-data possibilities include football, basketball, horse racing,
 bookmaker/exchange arbitrage, statistical value betting, non-transitivity,
 cross-market probability inconsistencies and other providers such as OddsRelay.
 These are architectural considerations only, with no implementation in this task.
