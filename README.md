@@ -1108,6 +1108,101 @@ uv run pytest tests/test_research.py -k optional_local_smoke
 Remove-Item Env:RUN_LOCAL_CSV_SMOKE
 ```
 
+## Historical data-quality investigation (Prompt 8A)
+
+Investigate the complete unfiltered candidate set without changing production
+mathematics, repairing source data or replacing the Prompt 8 reports:
+
+```powershell
+uv run betting-research investigate data/historical-imports --baseline data/research-output/report.json --output-dir data/investigation-output
+```
+
+`--baseline` is optional. When supplied, its content hash, input hashes and exact
+candidate comparison are recorded. It is read without modification. The command
+uses both ATP and WTA files, the original GBP100 hypothetical budget and no ROI
+filter. It makes no network/API requests. No credentials are needed.
+
+The ignored output directory contains:
+
+- `investigation.md`: executive assessment, actual schema, ROI distributions,
+  ATP/WTA comparisons, tournament/date/odds-range concentrations, individual
+  reviews of the highest 30 candidates, skipped audit and reliability assessment.
+- `statistics.json`: full statistics, input hashes, methods, subset denominators,
+  all skipped records and deterministic arithmetic/staking check results.
+- `top30.csv`: ranked original source file/line, IDs, dates, names, original odds
+  columns/values, reciprocal sum, ROI, comparison fields and suspected issues.
+- `roi_bands.csv`: counts and percentages for all, ATP and WTA candidates.
+- `confirmed_anomalies.csv`: confirmed missing or invalid selected prices and
+  original records. Missing data is distinct from proven corruption; an invalid
+  value does not establish how it arose.
+
+Percentiles use inclusive linear interpolation at `(n-1)*p/100`. ROI bands are
+`[0,1)`, `[1,2)`, `[2,5)`, `[5,10)`, `[10,20)`, `[20,50]` and `(50,infinity)`.
+Only positive candidate ROI is banded. Percentages use candidates within each
+scope; subset candidate rates use valid matches. Top ranking breaks ROI ties by
+filename/line. Tournament names/IDs are preserved; small subsets remain visible
+in JSON, with a 10-valid-match minimum for the Markdown tournament rate ranking.
+
+Independent validation parses raw prices as exact rational fractions. It checks
+all valid rows' conversions and candidate signs, plus ten lowest positive-ROI
+candidates below 10%, ten highest candidates and ten non-candidates. For each
+sample, it checks S, ROI, ideal stakes and all 10,001 possible GBP100 penny splits
+using exact rational payout flooring. Missing sample members in small fixtures
+are not invented. Production division results are compared at 45 significant
+digits. Suspicion flags are review heuristics: ROI above 50%, both prices above
+2, best/fair ratio at least 2, disagreement in favourite order, or price at least
+100. They neither confirm errors nor remove candidates. The original 2024 dates
+in the 2025 files remain source-quality findings rather than price-error claims.
+
+Reference investigation of the supplied files:
+
+| Scope | Valid matches | Candidates | Candidate rate | Median ROI | Mean ROI | Maximum ROI |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ATP | 2,949 | 517 | 17.5314% | 1.6735% | 8.2253% | 239.1549% |
+| WTA | 2,840 | 832 | 29.2958% | 2.5165% | 8.5057% | 444% |
+| All | 5,789 | 1,349 | 23.3028% | 2.1277% | 8.3982% | 444% |
+
+The complete ROI distribution and bands are in the generated report. Fifty
+candidates exceed 50% ROI. There are 191 suspicious candidates under the explicit
+overlapping heuristics, two confirmed domain-invalid price records (1.0), and
+121 confirmed missing-price records. These categories must not be conflated.
+The two invalid rows have alternative fair-odds pairs, but these are not used as
+replacement quotes. All 5,789 conversion/sign checks and all 30 detailed checks
+passed; the 1,349 candidates exactly match the Prompt 8 baseline.
+
+The maximum is `wta_matches_2025.csv:1610`, match `U9ijMY9t`, Montebello E. versus
+Jimenez Kasintseva V. at Billie Jean King Cup - Group III, starting
+2025-06-16T10:15:00Z. The raw pair 17.0/8.0 gives `S=25/136` and ROI 444%.
+The loser fair-price field is 1.071; the best-price field is 8.0. The collection
+method is not documented, so this difference is suspicious, not a proven mapping
+error. Swapping the two prices leaves S unchanged and cannot fix the result.
+Among candidates, 118 loser best prices are at least twice their fair-price
+field, compared with one winner price. All valid fair-price/probability checks
+agree within the documented 0.001 heuristic tolerance; this does not verify the
+best prices. All candidates have a positive reported `margin_pct` and negative
+best-price implied overround; the margin field's unknown definition prevents
+treating that difference as a confirmed error.
+
+Concentrations include ATP Hong Kong (14/27 candidates; eight over 50% ROI) and
+WTA Billie Jean King Cup - World Group (11/14 candidates). Nineteen of the 50
+extreme candidates have December 2024 match starts, across ATP and WTA. These
+are descriptive patterns, not explanations of data collection or proof of error.
+
+The high rate and maximum are reproducible algebraically, but their source-level
+cause remains unestablished. No bookmaker identity, quote simultaneity, identical
+settlement market or stake acceptance is established. The dataset remains useful
+for exploratory maths and data-quality research, with no executable or realised
+profit claims. The next step is to obtain the publisher, licence, collection
+methodology and timestamped per-bookmaker raw market/outcome/rule evidence before
+attempting opportunity verification. No speculative cleaning is applied.
+
+```powershell
+uv run pytest tests/test_investigation.py tests/test_research.py tests/test_arbitrage.py
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src tests/test_investigation.py
+```
+
 ## Planned scope and limitations
 
 Subsequent tasks may add other provider adapters, database storage

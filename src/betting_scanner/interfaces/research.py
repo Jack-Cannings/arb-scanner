@@ -8,6 +8,8 @@ from pathlib import Path
 
 from betting_scanner.research.analysis import analyse
 from betting_scanner.research.importer import import_directory
+from betting_scanner.research.investigation import investigate
+from betting_scanner.research.investigation_reporting import export_investigation
 from betting_scanner.research.reporting import export_report, terminal_summary
 from betting_scanner.strategies.arbitrage.calculation import validate_budget
 
@@ -27,8 +29,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     command.add_argument(
         "--output-dir", type=Path, default=Path("data/research-output")
     )
+    investigation = subcommands.add_parser("investigate")
+    investigation.add_argument("input_directory", type=Path)
+    investigation.add_argument("--baseline", type=Path)
+    investigation.add_argument(
+        "--output-dir", type=Path, default=Path("data/investigation-output")
+    )
     args = parser.parse_args(argv)
     try:
+        if args.command == "investigate":
+            audit = investigate(args.input_directory, args.baseline)
+            export_investigation(audit, args.output_dir)
+            print(
+                f"Unverified candidates: {audit.candidate_count}; "
+                f"suspicious cases: {audit.suspected_case_count}; "
+                "confirmed missing/invalid records: "
+                f"{len(audit.confirmed_anomalies)}"
+            )
+            print(
+                f"{len(audit.arithmetic_checks)} independent sample checks; "
+                f"{audit.sign_or_decimal_discrepancies} full-data "
+                "sign/conversion discrepancies"
+            )
+            print(f"Reports: {args.output_dir}")
+            return 0
         # Validate parameters before reading potentially large inputs.
         stake = validate_budget(Decimal(args.stake))
         minimum = Decimal(args.min_roi)
