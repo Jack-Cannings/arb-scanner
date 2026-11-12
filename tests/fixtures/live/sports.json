@@ -1,0 +1,34 @@
+[
+  {
+    "key": "tennis_atp_fictional_open",
+    "group": "Tennis",
+    "title": "Fictional ATP Open",
+    "description": "Men's Singles",
+    "active": true,
+    "has_outrights": false
+  },
+  {
+    "key": "tennis_wta_fictional_open",
+    "group": "Tennis",
+    "title": "Fictional WTA Open",
+    "description": "Women's Singles",
+    "active": true,
+    "has_outrights": false
+  },
+  {
+    "key": "tennis_atp_fictional_doubles",
+    "group": "Tennis",
+    "title": "Fictional Doubles",
+    "description": "Men's Doubles",
+    "active": true,
+    "has_outrights": false
+  },
+  {
+    "key": "tennis_atp_inactive_open",
+    "group": "Tennis",
+    "title": "Fictional Inactive Open",
+    "description": "Men's Singles",
+    "active": false,
+    "has_outrights": false
+  }
+]

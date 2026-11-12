@@ -1,9 +1,12 @@
 """Lossless archive timing and conservative provider-to-domain translation."""
 
+import json
 import unicodedata
+from datetime import datetime
+from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from betting_scanner.backtesting.models import HistoricalSnapshot
 from betting_scanner.core.models import (
@@ -51,10 +54,34 @@ def _label(value: str) -> str:
 def normalise(record: ResponseRecord, sport_key: str, region: str) -> NormalisedPage:
     validate_sport_key(sport_key)
     page = parse_page(record)
+    return _normalise_events(
+        record, sport_key, region, page.data, page.timestamp, historical=True
+    )
+
+
+def normalise_live(record: ResponseRecord, sport_key: str) -> NormalisedPage:
+    """Share event/quote parsing; live availability is genuine local receipt time."""
+    validate_sport_key(sport_key)
+    value: object = json.loads(record.body, parse_float=Decimal)
+    events = TypeAdapter(tuple[dict[str, object], ...]).validate_python(value)
+    return _normalise_events(
+        record, sport_key, "uk", events, record.collected_at, historical=False
+    )
+
+
+def _normalise_events(
+    record: ResponseRecord,
+    sport_key: str,
+    region: str,
+    events: tuple[dict[str, object], ...],
+    observed_at: datetime,
+    *,
+    historical: bool,
+) -> NormalisedPage:
     snapshots: list[HistoricalSnapshot] = []
     issues: list[NormalisationIssue] = []
     seen: set[str] = set()
-    for raw in page.data:
+    for raw in events:
         reference = raw.get("id")
         event_id = reference if isinstance(reference, str) else None
         try:
@@ -62,7 +89,9 @@ def normalise(record: ResponseRecord, sport_key: str, region: str) -> Normalised
             if event.sport_key != sport_key or event.id in seen:
                 raise ValueError("Mismatched competition or duplicate event")
             seen.add(event.id)
-            snapshots.append(_event(record, event, region))
+            snapshots.append(
+                _event(record, event, region, observed_at, historical=historical)
+            )
         except (ValueError, ValidationError):
             issues.append(
                 NormalisationIssue(
@@ -72,7 +101,7 @@ def normalise(record: ResponseRecord, sport_key: str, region: str) -> Normalised
                 )
             )
     # Duplicate provider event IDs make the entire page ambiguous, not one winner.
-    ids = [raw.get("id") for raw in page.data if isinstance(raw.get("id"), str)]
+    ids = [raw.get("id") for raw in events if isinstance(raw.get("id"), str)]
     if len(ids) != len(set(ids)):
         return NormalisedPage(
             snapshots=(),
@@ -86,8 +115,14 @@ def normalise(record: ResponseRecord, sport_key: str, region: str) -> Normalised
     return NormalisedPage(snapshots=tuple(snapshots), issues=tuple(issues))
 
 
-def _event(record: ResponseRecord, event: ApiEvent, region: str) -> HistoricalSnapshot:
-    page = parse_page(record)
+def _event(
+    record: ResponseRecord,
+    event: ApiEvent,
+    region: str,
+    observed_at: datetime,
+    *,
+    historical: bool,
+) -> HistoricalSnapshot:
     internal_id = _id("event", event.sport_key, event.id)
     labels = [event.home_team, event.away_team]
     if _label(labels[0]) == _label(labels[1]):
@@ -153,12 +188,14 @@ def _event(record: ResponseRecord, event: ApiEvent, region: str) -> HistoricalSn
                     decimal_odds=outcome.price,
                     provider_updated_at=market.last_update or book.last_update,
                     collected_at=record.collected_at,
-                    observed_at=page.timestamp,
+                    observed_at=observed_at,
                     metadata={
                         "requested_snapshot": record.requested_at.isoformat()
                         if record.requested_at
                         else None,
-                        "actual_snapshot": page.timestamp.isoformat(),
+                        "actual_snapshot": observed_at.isoformat()
+                        if historical
+                        else None,
                         "downloaded_at": record.collected_at.isoformat(),
                         "bookmaker_last_update": book.last_update.isoformat()
                         if book.last_update
@@ -185,7 +222,13 @@ def _event(record: ResponseRecord, event: ApiEvent, region: str) -> HistoricalSn
             competition_id=competition_id,
             participants=participants,
             scheduled_start=event.commence_time,
-            status=EventStatus.UNKNOWN,
+            status=(
+                EventStatus.UNKNOWN
+                if historical
+                else EventStatus.SCHEDULED
+                if event.commence_time > observed_at
+                else EventStatus.LIVE
+            ),
             provider_references={"the-odds-api": event.id},
         ),
         bookmakers=tuple(books),
@@ -202,4 +245,4 @@ def _event(record: ResponseRecord, event: ApiEvent, region: str) -> HistoricalSn
         ),
         quotes=tuple(quotes),
     )
-    return HistoricalSnapshot(observed_at=page.timestamp, snapshot=snapshot)
+    return HistoricalSnapshot(observed_at=observed_at, snapshot=snapshot)

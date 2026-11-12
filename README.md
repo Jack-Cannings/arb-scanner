@@ -1,20 +1,21 @@
 # Sports Betting Scanner
 
 A modular Python project for analysing pricing inefficiencies across bookmakers.
-The first planned application is a pre-match ATP/WTA tennis match-winner
+The initial application is a pre-match ATP/WTA tennis match-winner
 arbitrage scanner using UK bookmaker odds from The Odds API. Opportunities will
 be presented for manual investigation.
 
 ## Current implementation
 
 Project foundations, provider-independent core data models, an offline
-cross-bookmaker arbitrage engine and historical paper replay are implemented:
+cross-bookmaker arbitrage engine, historical paper replay and one-shot live
+tennis collection are implemented:
 an installable `src/` package, typed environment configuration, validated odds
 records, synthetic JSON fixtures, offline tests, linting, formatting, strict type
-checking and Linux/Windows CI. The application **cannot scan live odds yet**.
+checking and Linux/Windows CI. Live UK h2h scans require explicit execution.
 The engine compares normalised prices and calculates hypothetical stakes and
 profits. Historical replay adds a virtual bankroll and JSON/CSV reports.
-Explicit historical API discovery/download commands are available; no database
+Explicit current-odds and historical API commands are available; no database
 or dashboard is implemented. Backtesting cached datasets remains fully offline.
 There is no bookmaker account integration, real bet execution, continuous polling or
 real-money transaction support.
@@ -33,7 +34,7 @@ uv run python -c "import betting_scanner"
 uv creates `.venv` and installs the package in editable mode. `uv.lock` pins the
 dependency resolution. The build backend is pinned Hatchling. Pydantic v2 is a
 runtime dependency for validation and JSON serialisation of domain models. HTTPX
-handles explicitly invoked historical requests. Development tools are pytest,
+handles explicitly invoked provider requests. Development tools are pytest,
 Ruff and mypy.
 
 ## Configuration
@@ -90,18 +91,20 @@ Python 3.12 on Linux and Windows, with SHA-pinned actions and the committed lock
 src/betting_scanner/
   config.py              # Implemented typed settings
   core/models.py         # Validated provider-independent domain records
-  providers/odds_api/    # Historical client, normalisation, cache and reader
+  providers/odds_api/    # Shared HTTP client and live/historical normalisation
   strategies/arbitrage/  # Selection, Decimal mathematics and typed results
   backtesting/          # Historical readers, replay, execution, settlement, reports
-  storage/               # Future persistence
+  live/                 # One-shot collection, archive and terminal presentation
+  storage/files.py      # Atomic local files and cross-platform writer lock
   interfaces/backtest.py # Historical replay command line
+  interfaces/live.py     # Discovery and explicit single live scans
 tests/test_config.py     # Offline configuration tests
 tests/test_models.py     # Domain validation and fixture tests
 tests/test_arbitrage.py  # Selection, verification, mathematics and penny allocation
 tests/fixtures/          # Eight deterministic synthetic JSON scenarios
 ```
 
-Storage remains a placeholder. Dependency boundaries:
+Local file storage is implemented; database persistence remains future work. Boundaries:
 
 - **Core** is independent of providers and contains no tennis-specific assumptions.
 - **Providers** adapt external data into shared domain concepts. Strategies must
@@ -142,7 +145,7 @@ Pydantic's validation-bypassing `model_construct` or unchecked `model_copy` upda
 Providers will translate their own JSON into these records. Strategies will consume
 the same normalised records regardless of provider, so changing a provider does
 not change the calculations. The Odds API historical adapter implements this
-translation without duplicating strategy calculations.
+translation for historical and current odds without duplicating strategy calculations.
 
 ### Outcome definition and quote coverage
 
@@ -687,11 +690,161 @@ uv run pytest tests/test_odds_api.py tests/test_backtesting.py tests/test_arbitr
 They use [fictional provider responses](tests/fixtures/odds_api/README.md) and
 HTTPX MockTransport; there are no automatically run paid/live tests.
 
+## Current tennis odds: one-shot scanner
+
+`betting-live` discovers active ATP/WTA singles competitions, fetches explicitly
+selected UK `h2h` decimal prices, runs the existing arbitrage engine and archives
+the entire response for offline research. It places no bets. There is no monitor,
+automatic polling, background service or dashboard.
+
+Configure `ODDS_API_KEY` using the environment setup above. Discovery requires a
+key but makes only the zero-credit sport-listing request. The same shared HTTPX
+client, bounded retries, credential redaction and credit journal serve historical
+and current requests. No new dependencies were added for live scanning.
+
+Discover active competitions in PowerShell:
+
+```powershell
+uv sync --locked
+uv run betting-live discover
+$sportKey = Read-Host "Copy one active singles sport key from discovery"
+```
+
+`uv run betting-live` without a subcommand also defaults to discovery. Keys are
+obtained dynamically; inactive competitions, doubles, outrights and listings
+without explicit singles wording are excluded conservatively. An active listing
+does not promise any UK match prices. Empty discovery is reported clearly and
+never triggers queries against every tournament.
+
+Estimate one scan without credentials, network calls or new files:
+
+```powershell
+uv run betting-live scan --sport-key $sportKey --stake 100 --max-credits 5 --output-dir data/live-tennis
+```
+
+Only the following explicitly opted-in command fetches current odds:
+
+```powershell
+uv run betting-live scan --sport-key $sportKey --stake 100 --max-credits 5 --output-dir data/live-tennis --execute
+```
+
+Every selected key is checked against a fresh free active-singles listing before
+its odds are requested. To select multiple competitions, repeat the option:
+
+```powershell
+$secondKey = Read-Host "Another active singles key"
+uv run betting-live scan --sport-key $sportKey --sport-key $secondKey --stake 50 --max-credits 5 --output-dir data/live-tennis --execute
+```
+
+Duplicate key selections are collapsed; at most ten explicit selections are
+allowed. Calls are sequential. `--max-age 300` controls the provider-update
+freshness threshold in seconds. `--stake` must be a finite positive GBP amount
+in whole pennies. Global `--timeout` and `--retries` precede the subcommand, e.g.
+`uv run betting-live --retries 0 scan ...`.
+
+### Live costs and safeguards
+
+The [official current-odds documentation](https://the-odds-api.com/liveapi/guides/v4/)
+documents a one-credit base cost for one region/market and no charge for empty
+responses. UK `h2h` therefore has a one-credit per-competition estimate. With
+the default one retry, the conservative bound is two credits per selected key;
+actual charges are tracked separately from the retry allowance.
+
+The default five-credit cap is **cumulative for the archive directory**, not a
+fresh allowance on each invocation. Requests reserve credits before network I/O
+and persist all three quota headers. Missing quota headers leave actual usage
+unknown and retain the conservative reservation. Interrupted uncertain attempts
+also retain their reservation. A scan stops when either local headroom or the
+provider's most recently reported remaining credits cannot cover the next call.
+Retries share that cap. Increase `--max-credits` deliberately for subsequent
+scans; changing directories creates a separate local budget, not extra provider
+allowance. No code increases your API allowance or bypasses provider access rules.
+
+All live verification in this task used mocked HTTP, not real API credentials.
+Real scans must be run explicitly by the user with a valid key and remaining quota.
+
+### Reading candidates
+
+Filtering uses the actual local receipt timestamp: events whose `commence_time`
+is at or before receipt are excluded from analysis, including events that start
+while a request is in flight. Events starting shortly afterward are retained.
+The operational scheduled/live status follows that timestamp comparison; it is
+not an independent confirmation of the real match clock.
+
+For each mathematical candidate, the terminal prints competition, participants,
+start time, selected bookmaker names, odds, hypothetical penny stakes, theoretical
+ROI, rounded worst-case profit, provider update timestamps/ages, verification
+status and reasons for failed verification. The zero-opportunity summary still
+reports events, bookmakers, quote counts, market checks and credits consumed.
+Stale/future updates are excluded by the existing engine. Missing updates remain
+unverified; receipt time is never substituted for a missing bookmaker update.
+
+The API does not independently verify settlement contracts or complete market
+metadata. Those fields remain unknown rather than being inferred from bookmaker
+names. For example, the fictional 2.20/2.40 test case reports £52.17/£47.83 stakes
+and £14.77 rounded worst-case profit on £100, but **zero eligible opportunities**
+because verification is missing. A positive mathematical margin is a research
+candidate, not a claim of an executable or guaranteed profitable bet. Prices can
+change before manual acceptance; retirement rules, bookmaker limits and exchange
+commissions can also change the outcome of an apparent opportunity.
+
+### Saved observations and replay
+
+Default output is under ignored `data/live-tennis/`:
+
+```text
+manifest.json      # mode=live, format version, cumulative quota journal, requests and indices
+discovery.json     # Latest confirmed active singles listing
+raw/               # Sanitised received response text, timestamps and quota headers
+observations/      # All valid normalised quotes, issues, excluded starts and scan results
+scan-report.json   # Latest scan summary and detailed mathematical results
+replay.json        # Chronological unique pre-match observations, when available
+```
+
+Raw and normalised started-event data are retained for auditing, while only
+pre-match observations enter replay. All prices are stored, not only selected
+candidate legs. Invalid data remains visible in raw receipts and validation
+issues. Empty observations are recorded and do not fabricate a replayable market.
+The observation clock is local receipt time; original event/bookmaker IDs and
+bookmaker update times are preserved. No historical snapshot timestamp is invented.
+
+Identical responses at exactly the same competition/receipt time are indexed
+once. Conflicting responses at the same instant are excluded from replay. New
+receipt times are separate observations even when prices are unchanged; the
+scanner never relabels a cached response as freshly received. The archive's OS
+lock prevents overlapping writers. Interrupted raw receipts can be recovered at
+their original timestamps; requests with no receipt remain uncertain, not retried
+automatically for the old time.
+
+Replay without a key or API calls, choosing a new hypothetical budget:
+
+```powershell
+uv run betting-backtest data/live-tennis --bankroll 1000 --stake 100 --output-dir backtest-output/live-replay
+uv run betting-backtest data/live-tennis --bankroll 500 --stake 10 --execution-delay 30 --output-dir backtest-output/live-delayed
+```
+
+Unverified observations support mathematical analysis but not fabricated fills.
+If later verified data supports execution, the existing exact execution-time
+observation requirement still applies; a thirty-second gap cannot be filled with
+an old quote. No final tennis results are inferred, and missing settlement
+evidence leaves any accepted paper exposure unsettled. Archives containing only
+empty, invalid or started-event observations give a clear no-replayable-data error.
+
+Run the live and integration tests offline:
+
+```sh
+uv run pytest tests/test_live.py tests/test_odds_api.py tests/test_backtesting.py tests/test_arbitrage.py
+```
+
+The [live fixtures](tests/fixtures/live/README.md) are fictional, all HTTP uses
+MockTransport, and no test performs a real scan. Optional repeated monitoring
+was deliberately not implemented; invoke single scans manually.
+
 ## Planned scope and limitations
 
-Subsequent tasks may add other provider adapters, live odds retrieval, database storage
+Subsequent tasks may add other provider adapters, database storage
 and a dashboard. None of those features exists today. The current engine uses supplied
-normalised data, cached historical datasets and synthetic fixtures. It does not place bets or run polling
+normalised data, explicit live observations, cached historical datasets and synthetic fixtures. It does not place bets or run polling
 or background jobs.
 
 The models and engine already support synthetic three-way football examples.

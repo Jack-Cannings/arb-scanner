@@ -29,6 +29,7 @@ class ApiSport(WireModel):
     title: Text
     active: bool
     has_outrights: bool = False
+    description: str = ""
 
     @property
     def is_tennis(self) -> bool:
@@ -36,6 +37,16 @@ class ApiSport(WireModel):
             self.group.casefold() == "tennis"
             and self.key.startswith(("tennis_atp_", "tennis_wta_"))
             and not self.has_outrights
+        )
+
+    @property
+    def is_active_singles(self) -> bool:
+        wording = f"{self.key} {self.title} {self.description}".casefold()
+        return (
+            self.active
+            and self.is_tennis
+            and "singles" in wording
+            and "doubles" not in wording
         )
 
 

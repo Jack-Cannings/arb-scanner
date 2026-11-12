@@ -1,8 +1,6 @@
 """Small, journalled, credit-bounded historical downloads with offline caching."""
 
-import sys
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -23,6 +21,8 @@ from betting_scanner.providers.odds_api.schema import (
     parse_page,
     validate_sport_key,
 )
+from betting_scanner.storage.files import atomic_write as _write
+from betting_scanner.storage.files import directory_lock as _dataset_lock
 
 
 class DownloadPlan(DomainModel):
@@ -89,13 +89,6 @@ class DatasetManifest(DomainModel):
     gaps: tuple[tuple[UTCTimestamp, UTCTimestamp], ...] = ()
     normalisation_issues: tuple[NormalisationIssue, ...] = ()
     stop_reason: str | None = None
-
-
-def _write(path: Path, model: DomainModel) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(model.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
 
 
 def _stamp(timestamp: datetime) -> str:
@@ -376,35 +369,6 @@ def _cache_path(output: Path, relative: str) -> Path:
     if not path.is_relative_to(output.resolve()):
         raise ValueError("Cached file path must stay inside the dataset directory")
     return path
-
-
-@contextmanager
-def _dataset_lock(output: Path) -> Iterator[None]:
-    """OS lock releases even on process death; do not race a second downloader."""
-    output.mkdir(parents=True, exist_ok=True)
-    with (output / ".download.lock").open("a+b") as handle:
-        handle.write(b"0")
-        handle.flush()
-        handle.seek(0)
-        try:
-            if sys.platform == "win32":
-                import msvcrt
-
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            raise ValueError("Dataset is already in use by another download") from None
-        try:
-            yield
-        finally:
-            handle.seek(0)
-            if sys.platform == "win32":
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def download(

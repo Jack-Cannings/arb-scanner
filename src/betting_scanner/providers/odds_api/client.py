@@ -1,4 +1,4 @@
-"""Bounded, explicitly invoked historical HTTP requests and quota accounting."""
+"""Bounded, explicitly invoked v4 HTTP requests and shared quota accounting."""
 
 import json
 import time
@@ -84,7 +84,7 @@ class CreditLedger:
             self.persist(self.state)
 
     def reserve(self, cost: int, endpoint: str, requested_at: datetime | None) -> int:
-        if self.state.accounted_credits + cost > self.state.max_credits:
+        if cost > self.available_credits:
             raise CreditBudgetExceeded()
         index = len(self.state.attempts)
         attempt = ApiAttempt(
@@ -95,6 +95,20 @@ class CreditLedger:
         )
         self._save()  # Durably reserve BEFORE network I/O.
         return index
+
+    @property
+    def available_credits(self) -> int:
+        allowance = self.state.max_credits - self.state.accounted_credits
+        since_known = 0
+        for attempt in reversed(self.state.attempts):
+            if attempt.quota is not None and attempt.quota.remaining is not None:
+                return max(0, min(allowance, attempt.quota.remaining - since_known))
+            since_known += (
+                attempt.actual_credits
+                if attempt.actual_credits is not None
+                else attempt.reserved_credits
+            )
+        return max(0, allowance)
 
     def finish(self, index: int, record: ResponseRecord | None) -> None:
         attempt = self.state.attempts[index]
@@ -129,7 +143,7 @@ def _quota(headers: httpx.Headers) -> QuotaHeaders:
     )
 
 
-class HistoricalOddsClient:
+class OddsApiClient:
     def __init__(
         self,
         settings: Settings,
@@ -276,8 +290,10 @@ class HistoricalOddsClient:
                 )
             if response.status_code == 403:
                 raise OddsApiError(
-                    "historical_access",
-                    "Historical odds require suitable paid-plan access.",
+                    "historical_access"
+                    if endpoint.startswith("historical/")
+                    else "access_denied",
+                    "The Odds API denied access to this endpoint.",
                     last_record,
                 )
             if response.status_code == 404:
@@ -339,3 +355,20 @@ class HistoricalOddsClient:
                 "dateFormat": "iso",
             },
         )
+
+    def live_odds(self, sport_key: str) -> ResponseRecord:
+        """One explicitly selected UK decimal h2h request; filter starts locally."""
+        return self.get(
+            f"sports/{validate_sport_key(sport_key)}/odds",
+            cost=1,
+            params={
+                "regions": "uk",
+                "markets": "h2h",
+                "oddsFormat": "decimal",
+                "dateFormat": "iso",
+            },
+        )
+
+
+# Preserve the historical public name for existing callers and saved workflows.
+HistoricalOddsClient = OddsApiClient
