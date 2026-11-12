@@ -29,10 +29,11 @@ class OddsApiError(RuntimeError):
 
 
 class CreditBudgetExceeded(OddsApiError):
-    def __init__(self) -> None:
+    def __init__(self, limit_reason: str = "credit_budget") -> None:
         super().__init__(
             "credit_budget", "No further request fits the API credit budget."
         )
+        self.limit_reason = limit_reason
 
 
 class ClientOptions(DomainModel):
@@ -48,6 +49,7 @@ class ApiAttempt(DomainModel):
     status: Literal["in_flight", "received", "transport_error"] = "in_flight"
     http_status: int | None = None
     quota: QuotaHeaders | None = None
+    scope: str | None = None
 
 
 class BudgetState(DomainModel):
@@ -78,17 +80,65 @@ class CreditLedger:
             raise ValueError("The new budget is below credits already accounted for")
         self.state = state
         self.persist = persist
+        self._session_scope: str | None = None
+        self._session_limit: int | None = None
+        self.request_guard: Callable[[], None] | None = None
+
+    def restrict_session(self, scope: str, max_credits: int) -> None:
+        """Add a limit without changing persisted archive accounting or its cap."""
+        BudgetState(max_credits=max_credits)
+        if not scope or self._session_scope is not None:
+            raise ValueError("A nonempty session scope may be configured only once")
+        self._session_scope = scope
+        self._session_limit = max_credits
+
+    @property
+    def session_state(self) -> BudgetState | None:
+        if self._session_scope is None or self._session_limit is None:
+            return None
+        return BudgetState(
+            max_credits=self._session_limit,
+            attempts=tuple(
+                a for a in self.state.attempts if a.scope == self._session_scope
+            ),
+        )
+
+    def stop_reason(self, cost: int) -> str | None:
+        session = self.session_state
+        if (
+            session is not None
+            and session.accounted_credits + cost > session.max_credits
+        ):
+            return "session_credit_budget"
+        if self.state.accounted_credits + cost > self.state.max_credits:
+            return "archive_credit_budget"
+        if cost > self.available_credits:
+            return "api_quota_exhausted"
+        return None
+
+    @property
+    def exceeded_limits(self) -> bool:
+        session = self.session_state
+        return self.state.accounted_credits > self.state.max_credits or (
+            session is not None and session.accounted_credits > session.max_credits
+        )
 
     def _save(self) -> None:
         if self.persist is not None:
             self.persist(self.state)
 
     def reserve(self, cost: int, endpoint: str, requested_at: datetime | None) -> int:
-        if cost > self.available_credits:
-            raise CreditBudgetExceeded()
+        if self.request_guard is not None:
+            self.request_guard()
+        reason = self.stop_reason(cost)
+        if reason is not None:
+            raise CreditBudgetExceeded(reason)
         index = len(self.state.attempts)
         attempt = ApiAttempt(
-            endpoint=endpoint, requested_at=requested_at, reserved_credits=cost
+            endpoint=endpoint,
+            requested_at=requested_at,
+            reserved_credits=cost,
+            scope=self._session_scope,
         )
         self.state = self.state.model_copy(
             update={"attempts": (*self.state.attempts, attempt)}
@@ -99,6 +149,9 @@ class CreditLedger:
     @property
     def available_credits(self) -> int:
         allowance = self.state.max_credits - self.state.accounted_credits
+        session = self.session_state
+        if session is not None:
+            allowance = min(allowance, session.max_credits - session.accounted_credits)
         since_known = 0
         for attempt in reversed(self.state.attempts):
             if attempt.quota is not None and attempt.quota.remaining is not None:
@@ -236,7 +289,9 @@ class OddsApiClient:
                 body=response.text.replace(key, "[REDACTED]"),
             )
             self.ledger.finish(index, last_record)
-            if self.ledger.state.accounted_credits > self.ledger.state.max_credits:
+            if self.ledger.exceeded_limits or (
+                last_record.quota.last is not None and last_record.quota.last > cost
+            ):
                 raise OddsApiError(
                     "unexpected_cost",
                     "Reported API cost exceeded its documented bound; "

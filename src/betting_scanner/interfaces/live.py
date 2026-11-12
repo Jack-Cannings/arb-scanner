@@ -1,4 +1,4 @@
-"""Cost-estimated, opt-in single scans; default command is free discovery."""
+"""Cost-estimated, opt-in single scans and bounded local monitoring."""
 
 import argparse
 from collections.abc import Sequence
@@ -9,6 +9,17 @@ from pydantic import ValidationError
 
 from betting_scanner.config import load_settings
 from betting_scanner.live.models import LiveScanPlan
+from betting_scanner.live.monitor_models import (
+    MonitoringReport,
+    MonitorPlan,
+    StopReason,
+)
+from betting_scanner.live.monitor_reporting import (
+    completion_summary,
+    estimate_summary,
+    monitoring_scan_summary,
+)
+from betting_scanner.live.monitoring import estimate_monitor, monitor
 from betting_scanner.live.reporting import scan_summary
 from betting_scanner.live.scanner import discover_live, scan_live
 from betting_scanner.providers.odds_api.client import (
@@ -29,19 +40,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     discover = commands.add_parser("discover")
     discover.add_argument("--output-dir", type=Path, default=Path("data/live-tennis"))
     scan = commands.add_parser("scan")
-    scan.add_argument(
-        "--sport-key",
-        action="append",
-        required=True,
-        help="Repeat for each explicitly selected active singles key",
+    repeated = commands.add_parser("monitor")
+    for command in (scan, repeated):
+        command.add_argument(
+            "--sport-key",
+            action="append",
+            required=True,
+            help="Repeat for each explicitly selected active singles key",
+        )
+        command.add_argument("--stake", default="100.00")
+        command.add_argument(
+            "--max-credits", type=int, default=5 if command is scan else 10
+        )
+        command.add_argument(
+            "--max-age",
+            type=int,
+            default=300,
+            help="Maximum provider quote age in seconds",
+        )
+        command.add_argument(
+            "--output-dir", type=Path, default=Path("data/live-tennis")
+        )
+        command.add_argument("--execute", action="store_true")
+    repeated.add_argument(
+        "--interval", type=float, default=300, help="Seconds between scan starts"
     )
-    scan.add_argument("--stake", default="100.00")
-    scan.add_argument("--max-credits", type=int, default=5)
-    scan.add_argument(
-        "--max-age", type=int, default=300, help="Maximum provider quote age in seconds"
+    repeated.add_argument("--max-scans", type=int, default=10)
+    repeated.add_argument(
+        "--duration",
+        type=float,
+        help="Maximum duration in seconds; earliest limit wins",
     )
-    scan.add_argument("--output-dir", type=Path, default=Path("data/live-tennis"))
-    scan.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
     try:
         options = ClientOptions(timeout=args.timeout, max_retries=args.retries)
@@ -74,6 +103,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if args.max_credits < 0:
             raise ValueError("Credit cap must be nonnegative")
+        if args.command == "monitor":
+            monitoring_plan = MonitorPlan(
+                scan=plan,
+                interval=args.interval,
+                max_credits=args.max_credits,
+                max_scans=args.max_scans,
+                duration=args.duration,
+            )
+            print(
+                estimate_summary(
+                    estimate_monitor(monitoring_plan, args.output_dir, options)
+                )
+            )
+            if not args.execute:
+                print(
+                    "Dry run only. Add --execute to start finite monitoring; "
+                    "Ctrl+C stops it."
+                )
+                return 0
+            session = monitor(
+                monitoring_plan,
+                args.output_dir,
+                execute=True,
+                options=options,
+                client_factory=lambda ledger: OddsApiClient(
+                    load_settings(), ledger, options=options
+                ),
+                on_scan=lambda point, state: print(
+                    monitoring_scan_summary(point, state)
+                ),
+            )
+            assert isinstance(session, MonitoringReport)
+            print(completion_summary(session, args.output_dir))
+            return (
+                1
+                if session.stop_reason
+                in {StopReason.AUTHENTICATION, StopReason.PROVIDER_ERROR}
+                else 0
+            )
         print(f"Selected competitions: {', '.join(plan.sport_keys)}")
         print(
             f"Base cost: up to {len(plan.sport_keys)} credits; "

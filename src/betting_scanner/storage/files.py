@@ -16,10 +16,12 @@ def atomic_write(path: Path, model: DomainModel) -> None:
 
 
 @contextmanager
-def directory_lock(output: Path) -> Iterator[None]:
+def directory_lock(output: Path, name: str = ".download.lock") -> Iterator[None]:
     """The OS releases the lock on interruption or process death."""
     output.mkdir(parents=True, exist_ok=True)
-    with (output / ".download.lock").open("a+b") as handle:
+    if Path(name).name != name:
+        raise ValueError("Lock name must be a filename")
+    with (output / name).open("a+b") as handle:
         if handle.tell() == 0:
             handle.write(b"0")
             handle.flush()

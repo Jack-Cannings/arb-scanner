@@ -13,6 +13,7 @@ from betting_scanner.live.models import (
 )
 from betting_scanner.providers.odds_api.client import (
     BudgetState,
+    CreditBudgetExceeded,
     CreditLedger,
     OddsApiClient,
     OddsApiError,
@@ -58,6 +59,7 @@ def _report(
     errors: list[str],
     ledger: CreditLedger,
     attempt_start: int,
+    stop_code: str | None = None,
 ) -> LiveScanReport:
     analyses = [a for o in observations for a in o.analyses]
     prematch = [
@@ -93,6 +95,7 @@ def _report(
         rejected_markets=sum(
             a.actionability_status == ActionabilityStatus.REJECTED for a in analyses
         ),
+        stop_code=stop_code,
     )
 
 
@@ -100,10 +103,12 @@ def scan_live(
     plan: LiveScanPlan,
     output: Path,
     *,
-    max_credits: int = 5,
+    max_credits: int | None = 5,
     execute: bool = False,
     client_factory: ClientFactory | None = None,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    reserve_retry_allowance: bool = False,
+    on_report: Callable[[LiveScanReport], None] | None = None,
 ) -> LiveScanReport | None:
     """No-I/O dry run by default. Never reuse an old response as a current quote.
 
@@ -124,47 +129,82 @@ def scan_live(
         attempt_start = len(ledger.state.attempts)
         observations: list[LiveObservation] = []
         errors: list[str] = []
-        with client_factory(ledger) as client:
-            try:
-                active_keys = {s.key for s in _active(client, archive)}
-            except (ValueError, OddsApiError):
-                errors.append("Active competition discovery failed; no odds requested.")
-                active_keys = set()
-            for key in plan.sport_keys:
-                if key not in active_keys:
-                    errors.append(
-                        f"{key}: not confirmed as an active singles competition"
-                    )
-                    continue
-                if ledger.available_credits < 1:
-                    errors.append(
-                        "credit_budget: insufficient local or provider credits; "
-                        "scan stopped"
-                    )
-                    break
-                entry = archive.begin(key, plan)
-                response = None
+        stop_code: str | None = None
+        try:
+            with client_factory(ledger) as client:
                 try:
-                    response = client.live_odds(key)
-                    observation = archive.record(entry, response)
-                    observations.append(observation)
-                    if (
-                        observation.normalised.issues
-                        and not observation.normalised.snapshots
-                    ):
-                        errors.append(
-                            f"{key}: no valid events; inspect normalisation issues"
-                        )
+                    active_keys = {s.key for s in _active(client, archive)}
                 except OddsApiError as error:
-                    archive.fail(entry, error.code, error.response)
-                    errors.append(f"{key}: {error.code}; scan stopped")
-                    break
-                except ValueError:
-                    archive.fail(
-                        entry, "Malformed or conflicting live response", response
+                    stop_code = (
+                        error.limit_reason
+                        if isinstance(error, CreditBudgetExceeded)
+                        else error.code
                     )
-                    errors.append(f"{key}: malformed or conflicting response")
-        archive.rebuild()
-        report = _report(plan, observations, errors, ledger, attempt_start)
-        atomic_write(output / "scan-report.json", report)
+                    errors.append(
+                        "Active competition discovery failed; no odds requested."
+                    )
+                    active_keys = set()
+                except ValueError:
+                    stop_code = "malformed"
+                    errors.append(
+                        "Active competition discovery failed; no odds requested."
+                    )
+                    active_keys = set()
+                for key in plan.sport_keys:
+                    if key not in active_keys:
+                        errors.append(
+                            f"{key}: not confirmed as an active singles competition"
+                        )
+                        continue
+                    allowance = (
+                        1 + client.options.max_retries if reserve_retry_allowance else 1
+                    )
+                    reason = ledger.stop_reason(allowance)
+                    if reason is not None:
+                        stop_code = reason
+                        errors.append(
+                            "credit_budget: insufficient local or provider credits; "
+                            "scan stopped"
+                        )
+                        break
+                    entry = archive.begin(key, plan)
+                    response = None
+                    try:
+                        response = client.live_odds(key)
+                        observation = archive.record(entry, response)
+                        observations.append(observation)
+                        if (
+                            observation.normalised.issues
+                            and not observation.normalised.snapshots
+                        ):
+                            errors.append(
+                                f"{key}: no valid events; inspect normalisation issues"
+                            )
+                    except OddsApiError as error:
+                        stop_code = (
+                            error.limit_reason
+                            if isinstance(error, CreditBudgetExceeded)
+                            else error.code
+                        )
+                        archive.fail(entry, error.code, error.response)
+                        errors.append(f"{key}: {error.code}; scan stopped")
+                        break
+                    except ValueError:
+                        archive.fail(
+                            entry, "Malformed or conflicting live response", response
+                        )
+                        errors.append(f"{key}: malformed or conflicting response")
+        except KeyboardInterrupt:
+            stop_code = "user_interruption"
+            errors.append("Scan interrupted; uncertain charges remain reserved.")
+            archive.recover()
+            raise
+        finally:
+            archive.rebuild()
+            report = _report(
+                plan, observations, errors, ledger, attempt_start, stop_code
+            )
+            atomic_write(output / "scan-report.json", report)
+            if on_report is not None:
+                on_report(report)
         return report

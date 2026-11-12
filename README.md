@@ -8,8 +8,8 @@ be presented for manual investigation.
 ## Current implementation
 
 Project foundations, provider-independent core data models, an offline
-cross-bookmaker arbitrage engine, historical paper replay and one-shot live
-tennis collection are implemented:
+cross-bookmaker arbitrage engine, historical paper replay, one-shot live
+tennis collection and bounded local monitoring are implemented:
 an installable `src/` package, typed environment configuration, validated odds
 records, synthetic JSON fixtures, offline tests, linting, formatting, strict type
 checking and Linux/Windows CI. Live UK h2h scans require explicit execution.
@@ -17,7 +17,7 @@ The engine compares normalised prices and calculates hypothetical stakes and
 profits. Historical replay adds a virtual bankroll and JSON/CSV reports.
 Explicit current-odds and historical API commands are available; no database
 or dashboard is implemented. Backtesting cached datasets remains fully offline.
-There is no bookmaker account integration, real bet execution, continuous polling or
+There is no bookmaker account integration, real bet execution, unlimited polling or
 real-money transaction support.
 
 ## Setup
@@ -694,8 +694,8 @@ HTTPX MockTransport; there are no automatically run paid/live tests.
 
 `betting-live` discovers active ATP/WTA singles competitions, fetches explicitly
 selected UK `h2h` decimal prices, runs the existing arbitrage engine and archives
-the entire response for offline research. It places no bets. There is no monitor,
-automatic polling, background service or dashboard.
+the entire response for offline research. It places no bets. Bounded monitoring
+is a separate opt-in command below; there is no background service or dashboard.
 
 Configure `ODDS_API_KEY` using the environment setup above. Discovery requires a
 key but makes only the zero-credit sport-listing request. The same shared HTTPX
@@ -837,15 +837,169 @@ uv run pytest tests/test_live.py tests/test_odds_api.py tests/test_backtesting.p
 ```
 
 The [live fixtures](tests/fixtures/live/README.md) are fictional, all HTTP uses
-MockTransport, and no test performs a real scan. Optional repeated monitoring
-was deliberately not implemented; invoke single scans manually.
+MockTransport, and no test performs a real scan. Repeated scans require the
+explicit bounded monitoring command below; nothing starts automatically.
+
+## Controlled repeated scanning
+
+`betting-live monitor` calls the existing single-scan implementation sequentially.
+Defaults are a 300-second interval between **scan starts**, £100 hypothetical
+stake, a ten-credit **session** cap and at most ten scans. The first scan starts
+immediately; without delays ten starts would be at +0, +300, …, +2700 seconds.
+`--duration` optionally adds a limit in seconds; the earliest count, time or
+credit limit wins. The Python API also supports duration-only limits. Unbounded
+configuration, nonpositive intervals/durations and invalid stakes are rejected.
+
+Use an active singles key already returned by discovery:
+
+```powershell
+$sportKey = Read-Host "Active ATP/WTA singles sport key"
+uv run betting-live monitor --sport-key $sportKey --interval 300 --stake 100 --max-credits 10 --max-scans 10 --output-dir data/live-tennis
+```
+
+This is a **dry run**. It validates configuration, reads existing credit usage,
+shows the scheduled start offsets and retry-inclusive cost, and estimates how
+many complete scans the budgets can fund. It makes no HTTP requests, needs no
+API key, and does not create directories, locks or report files. For schedules
+longer than twenty starts, only the first twenty offsets are displayed.
+
+Explicitly authorise a foreground session:
+
+```powershell
+uv run betting-live monitor --sport-key $sportKey --interval 300 --stake 100 --max-credits 10 --max-scans 10 --output-dir data/live-tennis --execute
+```
+
+Or add a thirty-minute duration limit:
+
+```powershell
+uv run betting-live monitor --sport-key $sportKey --interval 300 --stake 100 --max-credits 10 --max-scans 10 --duration 1800 --output-dir data/live-tennis --execute
+```
+
+Repeat `--sport-key` for multiple explicitly selected competitions. Monitoring
+does not discover other competitions and start querying their odds automatically.
+Each iteration rechecks active singles coverage through the free listing. A
+competition becoming unavailable stops the session conservatively.
+
+### Two independent credit limits
+
+The monitoring `--max-credits` limit applies only to **this session**. It neither
+resets past usage nor increases the persistent archive cap. Each API attempt is
+tagged with its session ID in the existing quota journal, including retries and
+unknown charges. Other sessions and manual single scans still count against the
+archive cap, but are not charged to this session's total.
+
+For example, an existing archive with one credit used and a five-credit cap
+retains both values when you request a ten-credit session. Only four archive
+credits remain. One competition with the default one retry has a two-credit
+worst-case bound per scan, so the dry run can guarantee budget headroom for two
+complete scans, not ten. Unused retry allowances are not spent, so more successful
+scans may fit before the next full retry allowance no longer fits. Use global
+`--retries 0` before `monitor` if you explicitly prefer no retries.
+
+Before each scan, the entire competition set's conservative retry bound must fit
+the session limit, archive headroom and API-reported remaining credits. The
+single scanner also checks headroom before each competition, and the shared
+ledger checks every attempt/retry. Monitoring stops rather than silently raising
+the cap. To change an existing archive's cap deliberately, use the established
+single-scan `--max-credits` workflow; monitoring itself preserves it. A new
+directory starts with a persistent cap equal to the requested session cap.
+A discovery-only directory with an existing zero cap remains zero.
+
+Actual charged credits and conservatively accounted credits are reported
+separately. Missing quota headers and interrupted requests retain their reserved
+cost. Unexpected provider charges are recorded and stop the session; the program
+cannot reverse a charge already made by the API. Authentication failures are
+not retried by the monitor. Rate-limit/server retries stay bounded, share both
+budgets and use the existing client/backoff policy.
+
+### Scheduling and stopping
+
+Scheduling uses monotonic time and a fixed session anchor, so request duration
+does not accumulate into the polling interval. Slow scans, delayed wake-ups or
+computer suspension skip missed slots instead of launching overlapping requests
+or a burst of catch-up scans. Wall-clock changes do not shift the interval.
+
+Choose an interval that fits your quota and the usefulness of the observations;
+the five-minute default is a cautious starting point for local research, not an
+assurance that quotes remain available between polls. Faster scans consume
+allowance faster and still cannot establish bookmaker acceptance.
+
+Press **Ctrl+C** in the terminal to stop. The command saves partial results,
+records `user_interruption`, retains uncertain credit reservations, releases its
+locks and displays the final summary. Limits also stop the session automatically
+for scan count, duration, session/archive credit headroom or API quota. Provider,
+authentication and unrecoverable local-data errors are recorded as distinct
+stops. No new request starts at or after the duration deadline; a request already
+in flight can finish afterward, bounded by the configured HTTP timeout. Retry
+backoff waits are truncated at the duration deadline.
+
+The computer must remain running and the foreground command/terminal must stay
+open. There is no Windows service, scheduled startup task, cloud host, push
+notification or auto-resume process. Starting another session is an explicit
+command. A separate monitor lock prevents two monitors using the same archive;
+existing per-scan locks still prevent overlapping archive writers.
+
+### Candidate lifecycle and saved reports
+
+A candidate's deterministic identity uses its event, market and sorted
+outcome/bookmaker/provider combination. Odds, hypothetical stakes and ROI are
+values on that record, not its identity. Small odds changes update the same
+candidate; a different selected bookmaker/outcome combination creates a new one.
+First and most recent observed times, latest theoretical ROI, rounded worst-case
+profit, verification status and the full detector result are retained.
+
+Per-scan output distinguishes **new**, **continuing**, **no longer observed**
+and **not checked** candidates. A successful response with no matching candidate
+can establish “no longer observed”; failed or malformed observations cannot.
+Reappearing combinations continue their existing record rather than becoming
+another new discovery. The candidate index persists across sessions in this
+archive. “No longer observed” describes the selected feed result, not proof that
+every alternative price combination ceased to exist.
+
+Each scan prints actual observation timestamps, observed competitions, events,
+bookmakers, quotes, mathematical candidates, lifecycle counts, unverified/rejected
+counts and actual/accounted credits with remaining session allowance. Candidate
+details reuse the single-scan presentation: match, bookmakers, odds, hypothetical
+stakes, ROI, penny profit, quote freshness and verification. Unknown settlement
+rules stay unknown; monitoring never upgrades a candidate to verified executable
+profit. The final summary includes scan count, event observations versus unique
+events, unique candidates seen this session, credits, skipped slots and stop reason.
+
+All raw receipts and normalised observations use the existing archive. Additional
+files under the same ignored directory are:
+
+```text
+monitoring/monitor-000001.json  # Atomic running/final session checkpoints and per-scan results
+candidate-tracking.json        # Cross-session identities and last confirmed lifecycle state
+```
+
+Interrupted scans preserve valid partial observations at their actual timestamps.
+Missing receipts stay uncertain; no old quote is relabelled as newly received.
+Offline replay continues to use `replay.json` and its existing strict freshness,
+execution-time and settlement safeguards:
+
+```powershell
+uv run betting-backtest data/live-tennis --bankroll 1000 --stake 100 --output-dir backtest-output/monitor-replay
+```
+
+Run focused monitoring and integration tests without real waits or credits:
+
+```sh
+uv run pytest tests/test_monitoring.py tests/test_live.py tests/test_odds_api.py
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+```
+
+The tests inject wall and monotonic clocks, mock HTTP and advance simulated time
+instead of sleeping. No dependencies or betting strategies were added.
 
 ## Planned scope and limitations
 
 Subsequent tasks may add other provider adapters, database storage
 and a dashboard. None of those features exists today. The current engine uses supplied
-normalised data, explicit live observations, cached historical datasets and synthetic fixtures. It does not place bets or run polling
-or background jobs.
+normalised data, explicit live observations, cached historical datasets and synthetic fixtures.
+It does not place bets or run unattended background services.
 
 The models and engine already support synthetic three-way football examples.
 Longer-term live-data possibilities include football, basketball, horse racing,

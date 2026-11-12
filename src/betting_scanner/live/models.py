@@ -91,3 +91,4 @@ class LiveScanReport(DomainModel):
     eligible_opportunities: int
     unverified_candidates: int
     rejected_markets: int
+    stop_code: str | None = None
