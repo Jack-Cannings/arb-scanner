@@ -1,1 +1,1 @@
-"""Provider-independent, sport-independent domain concepts (future)."""
+"""Provider-independent, sport-independent domain models in :mod:`.models`."""

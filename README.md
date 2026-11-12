@@ -7,10 +7,11 @@ be presented for manual investigation.
 
 ## Current implementation
 
-Only project foundations are implemented: an installable `src/` package, typed
-environment configuration, offline tests, linting, formatting, strict type
+Project foundations and provider-independent core data models are implemented:
+an installable `src/` package, typed environment configuration, validated odds
+records, synthetic JSON fixtures, offline tests, linting, formatting, strict type
 checking and Linux/Windows CI. The application **cannot scan live odds yet**.
-There are no API requests, odds models, betting calculations, storage or dashboard.
+There are no API requests, betting calculations, storage or dashboard.
 There is no bookmaker account integration, bet execution, continuous polling or
 real-money transaction support.
 
@@ -26,8 +27,9 @@ uv run python -c "import betting_scanner"
 ```
 
 uv creates `.venv` and installs the package in editable mode. `uv.lock` pins the
-development dependency resolution. The build backend is pinned Hatchling;
-there are no runtime dependencies. Development tools are pytest, Ruff and mypy.
+dependency resolution. The build backend is pinned Hatchling. Pydantic v2 is the
+only direct runtime dependency, for validation and JSON serialisation of domain
+models. Development tools are pytest, Ruff and mypy.
 
 ## Configuration
 
@@ -82,15 +84,17 @@ Python 3.12 on Linux and Windows, with SHA-pinned actions and the committed lock
 ```text
 src/betting_scanner/
   config.py              # Implemented typed settings
-  core/                  # Future reusable domain concepts
+  core/models.py         # Validated provider-independent domain records
   providers/             # Future retrieval and normalisation
   strategies/arbitrage/  # Future opportunity calculations
   storage/               # Future persistence
   interfaces/            # Future commands, dashboards and alerts
 tests/test_config.py     # Offline configuration tests
+tests/test_models.py     # Domain validation and fixture tests
+tests/fixtures/          # Eight deterministic synthetic JSON scenarios
 ```
 
-All domain subpackages are placeholders. Dependency boundaries for later work:
+Providers, strategies, storage and interfaces remain placeholders. Dependency boundaries:
 
 - **Core** is independent of providers and contains no tennis-specific assumptions.
 - **Providers** adapt external data into shared domain concepts. Strategies must
@@ -103,6 +107,93 @@ All domain subpackages are placeholders. Dependency boundaries for later work:
   calculation logic. Core must not import these outer layers.
 
 No abstract base classes, plugin registries or service containers are needed yet.
+
+## Core data models
+
+`betting_scanner.core.models` contains Pydantic v2 models:
+
+- `Sport`, `Competition`, `Participant` and `Event` use stable internal identifiers
+  and display names. Events support any nonempty set of unique participants,
+  explicit status and optional provider references.
+- `Bookmaker` retains its internal ID and optional region/provider references.
+- `Market` describes its outcome space, type and expected outcome IDs; `Outcome`
+  uses a stable ID independent of labels or ordering, with an optional participant
+  reference. Match winner, three-way result and future market types are represented;
+  market-specific calculations and parameter schemas remain future work.
+- `OddsQuote` links provider/event/bookmaker/market/outcome IDs, exact decimal odds,
+  timestamps, settlement evidence and optional JSON metadata.
+- `OddsSnapshot` groups one event's records and checks cross-reference integrity.
+  Incomplete quote coverage and differing rules are valid observations, not errors.
+
+Models reject extra fields and invalid/blank identifiers. Internal IDs use 1-128
+ASCII letters, digits, underscores, periods, colons or hyphens, starting with a
+letter or digit. Provider references are opaque nonblank text, not internal IDs.
+Model fields cannot be reassigned; nested metadata/reference dictionaries should
+be treated as read-only. Use validated construction for changes rather than
+Pydantic's validation-bypassing `model_construct` or unchecked `model_copy` updates.
+
+Providers will translate their own JSON into these records. Strategies will consume
+the same normalised records regardless of provider, so changing a provider does
+not change the calculations. No provider parser or strategy is implemented yet.
+
+### Outcome definition and quote coverage
+
+`expected_outcome_ids` is explicit: `None` means unknown, while a nonempty unique
+tuple specifies the expected outcome set. `Market.definition_status` reports
+`complete`, `missing_expected_outcomes` or `unknown` by comparing the definitions
+in `outcomes` with that set. Two outcome definitions do not prove a complete market
+unless the expected set is known. No market type imposes a two-outcome limit.
+
+Definition completeness is separate from quote coverage at each bookmaker. Fixture
+C defines both outcomes but has only one quote at one bookmaker. Snapshot validation
+allows this partial observation. Eligibility decisions belong to Prompt 3.
+
+### Settlement evidence
+
+Each quote has a `SettlementRule`: match completion required, minimum one set
+completed, match started/first ball served, another documented rule, or unknown.
+It includes a verification flag, exact descriptive text and documentation/evidence.
+Missing rules default to unknown/unverified. Verification requires a known category
+and documentation; other documented rules require details even when unverified.
+
+Categories summarise only part of settlement behaviour. No rules are inferred from
+bookmaker names. Matching categories alone do not prove compatibility; unknown or
+unverified rules must never be classified as compatible. Rule evidence is retained
+for future strategy checks; no compatibility engine is implemented here.
+
+### Precision, timestamps and JSON
+
+Odds use `Decimal` and must be finite and greater than 1. Supply a Decimal, numeric
+string or integer. Binary floats are rejected to avoid losing precision before
+validation. JSON prices are strings, preserving decimal digits and trailing zeros.
+For metadata, encode precision-sensitive numbers as strings as well.
+
+Event start, optional provider update and required collection time are distinct.
+Datetime objects must be timezone-aware; ISO 8601 strings must include an offset.
+Numeric epoch inputs and naive datetimes are rejected. Accepted timestamps are
+normalised to UTC and serialised with `Z`. Missing provider timestamps remain
+`None`; recent collection does not imply a fresh provider update. There are no
+freshness thresholds yet.
+
+```python
+from pathlib import Path
+from betting_scanner.core.models import OddsSnapshot
+
+payload = Path("tests/fixtures/a_atp_candidate.json").read_text(encoding="utf-8")
+snapshot = OddsSnapshot.model_validate_json(payload)
+restored = OddsSnapshot.model_validate_json(snapshot.model_dump_json())
+assert restored == snapshot
+```
+
+Use typed constructors or `model_validate()` for Python data, `model_dump_json()`
+for JSON, and `model_validate_json()` to reconstruct validated records. These retain
+stable IDs, provider references, UTC timestamps, Decimal precision and metadata.
+
+Run the fixture/model tests with `uv run pytest tests/test_models.py`. The eight
+fixtures cover ATP candidate pricing, WTA without arbitrage, missing quotes,
+invalid odds, stale updates, differing rules, unknown rules and football with
+three outcomes. See [fixture descriptions](tests/fixtures/README.md). All data and
+rule evidence are fictional, fixed in time and loaded without network access.
 
 ## Planned scope and limitations
 
