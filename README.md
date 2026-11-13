@@ -1203,6 +1203,125 @@ uv run ruff format --check .
 uv run mypy src tests/test_investigation.py
 ```
 
+## Local dashboard (Prompt 9)
+
+Install and launch from the repository in Windows PowerShell:
+
+```powershell
+uv sync --locked
+uv run betting-dashboard
+```
+
+This starts Streamlit on `http://127.0.0.1:8501` and opens your browser. Stop it
+with Ctrl+C in its terminal. To suppress browser opening, choose another port
+or point it at another local project checkout:
+
+```powershell
+uv run betting-dashboard --headless --port 8502 --project-root "C:\path\to\arb-scanner"
+```
+
+The server binds to localhost. Streamlit usage telemetry is disabled. There are
+no hosted services, account logins, background odds polling, monitor controls or
+betting actions. The dashboard needs no API key and never loads `.env` itself.
+Do not put credentials in saved report fields; error handling omits raw validation
+inputs, and displayed text redacts an `ODDS_API_KEY` already present in the
+environment. Streamlit secrets files are ignored by Git.
+
+### Pages and saved sources
+
+| Page | What it shows | Sources under the configured project root |
+| --- | --- | --- |
+| Overview | Latest recorded observation/competition, matches, bookmakers, quotes, candidates, scan lifecycle counts, historical candidates and credit journal | `data/live-tennis/manifest.json`, indexed observations, monitoring checkpoints and research JSON |
+| Live Odds | Recorded competition/match/bookmaker prices, event starts, provider update/receipt times, freshness now, candidates, stakes, ROI, penny profit, verification and rejection reasons | `data/live-tennis/observations/`, using only the authoritative manifest index |
+| Monitoring History | Session checkpoints, scan counts, new/continuing candidates, stop reasons, per-scan quote/candidate/credit charts and archive credits | `data/live-tennis/monitoring/monitor-*.json` and manifest credit journal |
+| Historical Research | ATP/WTA counts/rates, ROI mean/median/distribution, candidates, source-row references, quality flags and confirmed missing/invalid records | `data/research-output/` and `data/investigation-output/` JSON/CSV exports |
+| Backtesting | Starting/ending cash/equity, realised hypothetical P&L, execution outcomes, settled/open positions, exposure, drawdown, chronological bankroll and simulated legs | Local report directories under `backtest-output/` and `data/backtests/` containing `report.json`, with optional `trades.csv` and `bankroll.csv` |
+
+Use the sidebar navigation and **Refresh saved files** after saving new outputs
+with the existing CLI. Refresh clears only the in-memory read cache. Source file
+size and nanosecond modification/creation metadata also invalidate cached loads
+on subsequent reruns. There is no automatic data collection or scheduled refresh.
+The dashboard reads generated research reports, not the 2025 raw CSVs on each
+interaction. JSON models are validated and cached; tables paginate at 50/100/250
+rows. Oversized files (over 100 MB) or CSV exports exceeding 50,000 records show
+an unavailable state rather than consuming unbounded memory.
+
+Live Odds lets you choose a saved observation timestamp, competition, match and
+bookmaker, set a minimum theoretical ROI, sort all displayed quotes and change
+the total hypothetical GBP stake. Stake input accepts Decimal whole pennies.
+Recalculation uses the existing production detector and penny allocator at the
+**original observation time**, retaining the original settlement/freshness checks.
+Freshness now is displayed separately; a receipt-time verification label never
+establishes present availability. The full selected cross-bookmaker combination
+is retained in each candidate's details. No archived observations are rewritten.
+
+Historical filters cover ATP/WTA, tournament, minimum theoretical ROI and review
+flags. When investigation data exists, review flags reuse the investigation's
+heuristics; otherwise the original research warnings are displayed. Summary
+metrics describe the complete saved report/scope; candidate table filters do not
+rewrite saved statistics. Different research/investigation input versions are
+flagged. CSV previews are separate saved exports; validated JSON supplies metrics.
+Unknown bookmaker identity, price simultaneity and settlement compatibility
+remain explicit. No historical summed theoretical profits are presented as
+realised returns.
+
+Backtest selection uses discovered directories within the two configured output
+roots. Absolute/traversing selections and symlinks escaping those roots are
+rejected. JSON is the source of metric/position truth; CSVs are optional detail
+previews. Open stake exposure remains separate from realised hypothetical P&L.
+Equity carries open accepted stakes at cost, not anticipated winnings. Simulated
+fills are never labelled as real bookmaker transactions.
+
+The API credit panel reads `manifest.json`'s existing journal. It shows actual
+charges when known, conservative accounted usage including uncertain reservations,
+the archive cap/headroom, last reported provider balance, its request timestamp
+when available and the journal update timestamp. These timestamps describe saved
+evidence, not guaranteed current quota. Session credit totals come from recorded
+session budgets; scan charts use each recorded run's budget. No separate ledger
+is created and no reservations, usage or caps are reset.
+
+A saved checkpoint with no finish time is shown as incomplete; it is not claimed
+to prove an active monitor process. Start monitoring separately in PowerShell:
+
+```powershell
+# Inspect cached competition discovery and choose its actual sport key:
+uv run betting-live discover
+$sportKey = "<actual-tennis-key-from-discovery>"
+# Preview the bounded plan and credit estimate:
+uv run betting-live monitor --sport-key $sportKey --interval 300 --stake 100 --max-credits 5 --max-scans 3 --output-dir data/live-tennis
+# After reviewing the preview, adding --execute explicitly enables paid calls.
+```
+
+Generate the read-only historical and backtesting sources separately:
+
+```powershell
+uv run betting-research analyse data/historical-imports --stake 100
+uv run betting-research investigate data/historical-imports --baseline data/research-output/report.json
+uv run betting-backtest tests/fixtures/histories/a_success.json --bankroll 1000 --stake 100 --output-dir backtest-output/success
+# Replay existing recorded live observations without collecting more data:
+uv run betting-backtest data/live-tennis --output-dir backtest-output/live-replay
+```
+
+Missing directories, empty archives, partial writes and malformed JSON/CSV files
+produce informative empty/unavailable states. A missing or invalid manifest
+prevents orphaned observation files from being treated as authoritative data.
+Wait for the CLI writer to finish, then refresh; the dashboard does not repair,
+recover or mutate archives. Generate missing reports with the commands above and
+check `--project-root` if your data is in another checkout. If port 8501 is busy,
+choose another port. Refresh affects the local view only and cannot make old odds
+current or upgrade unknown rules.
+
+```powershell
+uv run pytest tests/test_dashboard.py tests/test_live.py tests/test_monitoring.py tests/test_backtesting.py tests/test_arbitrage.py tests/test_research.py
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+```
+
+Dashboard tests use deterministic files and Streamlit AppTest to navigate every
+page, change filters/stakes and refresh. They forbid HTTP calls and compare file
+hashes before/after reruns, including the credit journal. No API credits are spent.
+
 ## Planned scope and limitations
 
 Subsequent tasks may add other provider adapters, database storage
